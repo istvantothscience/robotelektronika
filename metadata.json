@@ -1,0 +1,6 @@
+{
+  "name": "STEMPUNK - 3D Fizika Kalandjáték",
+  "description": "Bejárható 3D posztapokaliptikus/steampunk fizikatanulási kalandjáték 8. osztályos diákok számára, küldetésekkel és elektrosztatika kihívásokkal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
