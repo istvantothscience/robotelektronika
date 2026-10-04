@@ -3,6 +3,7 @@ import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { ExperimentModal } from './components/ExperimentModal';
 import { MenuModal } from './components/MenuModal';
+import { WorldInteractionModal } from './components/WorldInteractionModal';
 import { NotificationToast } from './components/NotificationToast';
 import { StoryDialogBubble } from './components/StoryDialogBubble';
 import { useGameStore } from './store/useGameStore';
@@ -21,10 +22,13 @@ export default function App() {
       {/* Opening Story Monologue Speech Bubble */}
       <StoryDialogBubble />
 
-      {/* Interactive Electrostatics Laboratory Experiment Modal */}
+      {/* Interactive Physics & Electrostatics Laboratory Experiment Modal (Main Quests) */}
       {activeModal === 'experiment' && <ExperimentModal />}
 
-      {/* In-Game Terminal & Pause Menu (Quest Log, Discoveries, Vercel/Supabase Bridge) */}
+      {/* 3-Category World Interaction Modal (Ambient Inspections, Companion VOLT-7, Side Quests & Homework) */}
+      {activeModal === 'world_interaction' && <WorldInteractionModal />}
+
+      {/* In-Game Terminal & Pause Menu (Quests, Side Quests, 3D Upgrades, Memories, Vercel/Supabase Bridge) */}
       {activeModal === 'menu' && <MenuModal />}
 
       {/* Notification Toast Stack */}

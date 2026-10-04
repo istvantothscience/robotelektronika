@@ -12,16 +12,17 @@ export const Minimap: React.FC<MinimapProps> = ({ playerX, playerZ, playerAngle 
   const mapRadius = 56;
   const worldScale = 1.6; // pixels per world meter
 
-  // Key POIs
+  // Key Open-World Steampunk POIs
   const pois = [
-    { id: 'lab', label: 'Static Lab', x: 0, z: -18, color: '#8b5cf6' },
-    { id: 'junkyard', label: 'Junkyard', x: -10, z: 8, color: '#f43f5e' },
-    { id: 'pod', label: 'Awakening Pod', x: 0, z: 13, color: '#22d3ee' },
-    { id: 'tower', label: 'Central Tower', x: 0, z: -26, color: '#ffb52e' },
+    { id: 'lab', label: 'Kutató Állomás', x: 0, z: -16, color: '#f59e0b' },
+    { id: 'tesla', label: 'Villámló Tesla-Tekercsek', x: 12, z: -4, color: '#38bdf8' },
+    { id: 'junkyard', label: 'Automatamag & Gőzgépek', x: -11, z: 5, color: '#fbbf24' },
+    { id: 'pod', label: 'Ébredési Óramű', x: 0, z: 11, color: '#fde68a' },
+    { id: 'tower', label: 'Központi Torony', x: 0, z: -34, color: '#fb923c' },
   ];
 
   return (
-    <div className="relative w-32 h-32 rounded-full bg-slate-950/85 backdrop-blur-md border-2 border-cyan-500/50 shadow-2xl overflow-hidden flex items-center justify-center">
+    <div className="relative w-32 h-32 rounded-full bg-amber-950/85 backdrop-blur-md border-2 border-amber-500/60 shadow-2xl overflow-hidden flex items-center justify-center">
       {/* Outer Compass Ring & Markings */}
       <div className="absolute inset-0 rounded-full border border-cyan-400/20" />
       <div className="absolute top-1 text-[10px] font-bold text-cyan-400 font-mono">N</div>

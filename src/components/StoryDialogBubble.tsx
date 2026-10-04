@@ -19,8 +19,8 @@ export const StoryDialogBubble: React.FC = () => {
       status: 'Cél: Töltsd fel a kondenzátorokat és indulj el felfelé!',
     },
     {
-      title: 'ELSŐ KÜLDETÉS // AZ ELEKTROSZTATIKA LABOR',
-      text: 'Előttem egy működő kutatóállomás áll! Sétálj végig a fém sétányon a lila/cian fényű laborba, és lépj a kísérleti asztalhoz, hogy megértsd a titokzatos vonzóerőt!',
+      title: 'ELSŐ KÜLDETÉS // SZABAD ÉG ALATTI KÍSÉRLETI ASZTAL',
+      text: 'Előttem a roncstelep közepén egy nyitott steampunk kísérleti asztal áll! Sétálj végig a fogaskerekek és gőzkazánok között a lila fényoszlophoz, és vizsgáld meg az elektrosztatikus kísérleti asztalt!',
       status: 'Irányítás: WASD mozgás, Egér kamera, E interakció',
     },
   ];

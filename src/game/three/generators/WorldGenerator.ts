@@ -1,10 +1,17 @@
 import * as THREE from 'three';
 import { LevelEnvironmentSpec, LEVEL_SPECIFICATIONS } from './LevelEnvironmentSpec';
 import { ProceduralMeshFactory } from './ProceduralMeshFactory';
-import { soundManager } from '../../../audio/soundManager';
+import { PBRTextureGenerator } from '../materials/PBRTextureGenerator';
+import { EnvironmentalStoryLandmarks } from '../environment/EnvironmentalStoryLandmarks';
+import { LocalizedSteamAndSparks } from '../effects/LocalizedSteamAndSparks';
+import { LEVEL_1_WORLD_INTERACTABLES } from '../../../data/worldContent';
+import { InteractionCategory } from '../../../types/game';
 
 export interface GeneratedQuestBeacon {
   id: string;
+  category: InteractionCategory;
+  promptKey: string;
+  subtitle: string;
   group: THREE.Group;
   position: THREE.Vector3;
   radius: number;
@@ -14,6 +21,34 @@ export interface GeneratedQuestBeacon {
   iconMesh: THREE.Mesh;
 }
 
+interface AnimatedSteamEngine {
+  flywheel: THREE.Group;
+  driveGear: THREE.Group;
+  pistonRod: THREE.Group;
+  governor: THREE.Group;
+  phaseOffset: number;
+  speed: number;
+}
+
+interface DynamicLightningArc {
+  line: THREE.Line;
+  start: THREE.Vector3;
+  end: THREE.Vector3;
+  segments: number;
+  swayAmplitude: number;
+  light?: THREE.PointLight;
+}
+
+interface SmokePlumeEmitter {
+  points: THREE.Points;
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  riseSpeed: number;
+  maxHeight: number;
+  spread: number;
+}
+
 export class WorldGenerator {
   public rootGroup: THREE.Group;
   public colliders: THREE.Box3[] = [];
@@ -21,17 +56,35 @@ export class WorldGenerator {
   public currentSpec: LevelEnvironmentSpec;
 
   // Animated elements
-  private rotatingGears: THREE.Mesh[] = [];
-  private labDoorLeft: THREE.Mesh | null = null;
-  private labDoorRight: THREE.Mesh | null = null;
-  private doorProgress: number = 0;
-  private doorPlayedSfx: boolean = false;
+  private rotatingGears: { gear: THREE.Object3D; speed: number; axis: 'x' | 'y' | 'z' }[] = [];
+  private steamEngines: AnimatedSteamEngine[] = [];
+  private lightningArcs: DynamicLightningArc[] = [];
+  private animatedCranes: { crane: THREE.Group; baseRotY: number; phase: number }[] = [];
+  private smokePlumes: SmokePlumeEmitter[] = [];
+  private localizedSteamAndSparks: LocalizedSteamAndSparks | null = null;
+  private cloudLayerGroup: THREE.Group | null = null;
+  private sunbeamsGroup: THREE.Group | null = null;
+  private companionVolt7: {
+    group: THREE.Group;
+    bodyGroup: THREE.Group;
+    gyroRing: THREE.Mesh;
+  } | null = null;
   private holoAtom: THREE.Group | null = null;
   private sparkParticles: THREE.Points | null = null;
   private steamParticles: THREE.Points | null = null;
-  private sparkLight: THREE.PointLight | null = null;
   private centralElevatorBeam: THREE.Mesh | null = null;
   private towerRings: THREE.Mesh[] = [];
+  private airships: {
+    group: THREE.Group;
+    propeller: THREE.Group;
+    radius: number;
+    altitude: number;
+    speed: number;
+    angle: number;
+  }[] = [];
+  private skyCityLights: THREE.Points | null = null;
+  private lastLightningUpdate: number = 0;
+  private tempVec: THREE.Vector3 = new THREE.Vector3();
 
   constructor(initialLevelNumber: number = 1) {
     this.rootGroup = new THREE.Group();
@@ -40,7 +93,12 @@ export class WorldGenerator {
   }
 
   /**
-   * Generates or regenerates a complete, super-detailed 3D world based on a declarative LevelEnvironmentSpec
+   * Generates a richly composed, open-world Industrial Steampunk Scrapyard Valley following a
+   * strict 3-Tier Visual Hierarchy:
+   * - TIER 1 (Large Forms): Foundry Buildings, Power Substations, Scrap Mountains, Terrain Berms, Distant Factories
+   * - TIER 2 (Medium Forms): Hammerhead Cranes, Overhead Pipe Bridges, Gantries, Steam Engines, Tesla Coils
+   * - TIER 3 (Small Props): Fallen Mech Wrecks, Detached Robot Assemblies, Ground Detail Scatter
+   * - ATMOSPHERE: Sky Panorama, 3D Cloud Banks, Rising Smokestack Plumes, Volumetric Sunbeams
    */
   public generateLevel(spec: LevelEnvironmentSpec) {
     this.currentSpec = spec;
@@ -54,711 +112,1064 @@ export class WorldGenerator {
     this.colliders = [];
     this.questBeacons = [];
     this.rotatingGears = [];
+    this.steamEngines = [];
+    this.lightningArcs = [];
+    this.animatedCranes = [];
+    this.smokePlumes = [];
+    this.cloudLayerGroup = null;
+    this.sunbeamsGroup = null;
+    this.companionVolt7 = null;
     this.towerRings = [];
-    this.doorProgress = 0;
-    this.doorPlayedSfx = false;
+    this.airships = [];
 
-    // 1. Terrain & Walkways
-    this.buildTerrain(spec);
+    // 0. SKY, CLOUDS & DISTANT HORIZON: Panoramic Industrial Sky, 3D Cloud Deck & Airships
+    this.buildSkyCloudsAndAirships();
 
-    // 2. Canyon Enclosure
-    this.buildCanyonWalls(spec);
+    // 1. TIER 1 (LARGE FORMS - TERRAIN & SCRAP MOUNTAINS): Grounded Terrain, Berms & Colossal Scrap Mountains
+    this.buildTerrainAndScrapMountains(spec);
 
-    // 3. Overhead Gantries
-    this.buildGantries(spec);
+    // 2. TIER 1 (LARGE FORMS - BUILDINGS & DISTANT FACTORIES): Foundry Hall, Power Substation, Reservoir Towers & Horizon Factories
+    this.buildLargeBuildingsAndDistantFactories();
 
-    // 4. Populated Props & Machinery via ProceduralMeshFactory
-    this.buildPopulatedProps(spec);
+    // 3. TIER 2 (MEDIUM FORMS - CRANES, GANTRIES & PIPE BRIDGES): Hammerhead Cranes & Overhead Pipe Networks
+    this.buildCranesAndPipeNetworks();
 
-    // 5. The Colossal 6-Tier Vertical Tower Backdrop
+    // 4. TIER 2 (MEDIUM FORMS - MACHINERY): Working Reciprocating Steam Engines, Boilers & Turbines
+    this.buildWorkingSteamEngines();
+
+    // 5. TIER 2 (MEDIUM FORMS - HIGH-VOLTAGE): Sparking Tesla Coils & Dynamic 3D Lightning Arcs
+    this.buildSparkingTeslaCoils();
+
+    // 6. TIER 3 (SMALL PROPS & DETAIL): Fallen Mech Wrecks, Detached Robot Assemblies & Ground Scatter
+    this.buildScrapyardDetailScatter(spec);
+
+    // 7. TIER 1 LANDMARK: Colossal Central Industrial Power Spire & Blast Tower
     this.buildTowerBackdrop();
 
-    // 6. Main Research Facility Building
-    this.buildFacility(spec);
+    // 8. FOREGROUND FOCAL POINT: Open-Air Steampunk Research Outpost (360-degree accessible)
+    this.buildSteampunkOutpost(spec);
 
-    // 7. Quest Hologram Beacons
+    // 8B. ENVIRONMENTAL STORYTELLING LANDMARKS: Monumental Sector Gate, Collapsed Viaduct, Abandoned Repair Bay & Ground Cables
+    this.buildEnvironmentalStoryLandmarks();
+
+    // 9. QUEST HOLOGRAM BEACONS
     this.buildQuestBeacons(spec);
 
-    // 8. Atmospheric Particles
-    this.buildAtmosphere(spec);
+    // 10. ATMOSPHERIC DEPTH: Billowing Smokestack Plumes, Localized Pipe Steam, Intermittent Sparks & Volumetric Sunbeams
+    this.buildSmokeAndAtmosphere();
   }
 
-  private buildTerrain(spec: LevelEnvironmentSpec) {
+  /**
+   * 8B. Environmental Storytelling Landmarks & Ground Cable Conduits
+   */
+  private buildEnvironmentalStoryLandmarks() {
+    // 1. Monumental Sealed Sector Gate framing the Northern Elevator Citadel (z = -30.5)
+    const sectorGate = EnvironmentalStoryLandmarks.createMonumentalSectorGate(
+      new THREE.Vector3(0, 0, -30.5)
+    );
+    this.rootGroup.add(sectorGate);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-7.8, 0, -32.2), new THREE.Vector3(-4.6, 12, -28.8)),
+      new THREE.Box3(new THREE.Vector3(4.6, 0, -32.2), new THREE.Vector3(7.8, 12, -28.8))
+    );
+
+    // 2. Collapsed Factory Bridge / Viaduct Overpass on the North-Western Ridge
+    const collapsedBridge = EnvironmentalStoryLandmarks.createCollapsedIndustrialBridge(
+      new THREE.Vector3(-12.5, 0, -29.0),
+      0.28
+    );
+    this.rootGroup.add(collapsedBridge);
+
+    // 3. Abandoned Automaton Field Repair Bay ([-19, 0, -19])
+    const repairBay = EnvironmentalStoryLandmarks.createAbandonedRepairBay(
+      new THREE.Vector3(-19.0, 0, -19.0),
+      0.55
+    );
+    this.rootGroup.add(repairBay);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-21.6, 0, -21.2), new THREE.Vector3(-16.4, 4.2, -16.8))
+    );
+
+    // 4. Ground Power Cable & Oxidized Copper Conduit Network linking generators to the Outpost & Gate
+    const cableNetwork = EnvironmentalStoryLandmarks.createGroundCableNetwork();
+    this.rootGroup.add(cableNetwork);
+  }
+
+  /**
+   * 0. Sky Dome, 3D Drifting Cloud Deck, Distant Horizon Lights & Cruising Dirigibles
+   */
+  private buildSkyCloudsAndAirships() {
+    // 1. 360-degree Panoramic Industrial Valley & Distant Factory Sky Dome
+    const skyTex = PBRTextureGenerator.createSubterraneanCitySkyTexture();
+    const domeGeo = new THREE.SphereGeometry(142, 48, 32);
+    const domeMat = new THREE.MeshBasicMaterial({
+      map: skyTex,
+      side: THREE.BackSide,
+      fog: false,
+    });
+    const skyDome = new THREE.Mesh(domeGeo, domeMat);
+    skyDome.position.set(0, -4, 0);
+    this.rootGroup.add(skyDome);
+
+    // 2. 3D Volumetric High-Altitude Cloud Deck (Soft layered cloud banks drifting overhead)
+    const cloudGroup = new THREE.Group();
+    const cloudMatDark = new THREE.MeshBasicMaterial({
+      color: 0x36322e,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+      fog: false,
+    });
+    const cloudMatWarm = new THREE.MeshBasicMaterial({
+      color: 0x8c6239,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      fog: false,
+    });
+
+    for (let i = 0; i < 28; i++) {
+      const angle = (i / 28) * Math.PI * 2 + (i % 3) * 0.2;
+      const dist = 35 + (i % 4) * 22;
+      const cx = Math.cos(angle) * dist;
+      const cz = Math.sin(angle) * dist;
+      const cy = 42 + (i % 5) * 4.5;
+
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(9 + (i % 4) * 3.5, 10, 8),
+        i % 3 === 0 ? cloudMatWarm : cloudMatDark
+      );
+      puff.position.set(cx, cy, cz);
+      puff.scale.set(2.4, 0.32, 1.6);
+      puff.rotation.y = angle;
+      cloudGroup.add(puff);
+    }
+    this.rootGroup.add(cloudGroup);
+    this.cloudLayerGroup = cloudGroup;
+
+    // 3. Distant Horizon Factory Beacon & Furnace Lights
+    const cityLightCount = 240;
+    const cityGeo = new THREE.BufferGeometry();
+    const cityPos = new Float32Array(cityLightCount * 3);
+    for (let i = 0; i < cityLightCount; i++) {
+      const angle = (i / cityLightCount) * Math.PI * 2 + (i % 7) * 0.15;
+      const dist = 96 + (i % 5) * 6;
+      cityPos[i * 3] = Math.cos(angle) * dist;
+      cityPos[i * 3 + 1] = 4 + (i % 10) * 2.4;
+      cityPos[i * 3 + 2] = Math.sin(angle) * dist;
+    }
+    cityGeo.setAttribute('position', new THREE.BufferAttribute(cityPos, 3));
+    const cityMat = new THREE.PointsMaterial({
+      color: 0xfbbf24,
+      size: 0.85,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    });
+    this.skyCityLights = new THREE.Points(cityGeo, cityMat);
+    this.rootGroup.add(this.skyCityLights);
+
+    // 4. 4 Cruising Steampunk Dirigibles / Airships patrolling the distant industrial skyline
+    const airshipSpecs = [
+      { radius: 54, altitude: 29, speed: 0.11, startAngle: 0.4, scale: 1.1 },
+      { radius: 68, altitude: 36, speed: -0.09, startAngle: 2.2, scale: 1.25 },
+      { radius: 46, altitude: 25, speed: 0.13, startAngle: 4.1, scale: 0.95 },
+      { radius: 76, altitude: 42, speed: -0.08, startAngle: 5.4, scale: 1.35 },
+    ];
+
+    airshipSpecs.forEach((as) => {
+      const { group, propeller } = ProceduralMeshFactory.createSteampunkAirship(as.scale);
+      this.rootGroup.add(group);
+      this.airships.push({
+        group,
+        propeller,
+        radius: as.radius,
+        altitude: as.altitude,
+        speed: as.speed,
+        angle: as.startAngle,
+      });
+    });
+  }
+
+  /**
+   * 1. TIER 1 (LARGE FORMS): Grounded Industrial Terrain, Undulating Slag Berms & Colossal Scrap Mountains
+   */
+  private buildTerrainAndScrapMountains(spec: LevelEnvironmentSpec) {
     const [w, d] = spec.terrain.size;
 
-    // Ground Plane
-    const groundGeo = new THREE.PlaneGeometry(w, d, 28, 28);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: spec.terrain.groundColor,
-      roughness: 0.75,
-      metalness: 0.55,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
+    // 1. Vast Grounded Industrial Earth & Slag Terrain Plane with Organic Perimeter Height Variation
+    const groundGeo = new THREE.PlaneGeometry(w, d, 64, 64);
+    const posAttr = groundGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < posAttr.count; i++) {
+      const vx = posAttr.getX(i);
+      const vy = posAttr.getY(i); // maps to world Z after -PI/2 rotation
+      const dist = Math.sqrt(vx * vx + vy * vy);
+      // Keep playable central yard (r < 23m) flat for exact collision & foot placement;
+      // sculpt organic hills, slag ridges, and craters across the outer valley (r > 23m)
+      if (dist > 23) {
+        const blend = Math.min(1.0, (dist - 23) / 18);
+        const ridge =
+          Math.sin(vx * 0.085) * Math.cos(vy * 0.085) * 2.2 +
+          Math.sin(vx * 0.19 + vy * 0.15) * 0.95 +
+          Math.cos(dist * 0.14) * 0.85;
+        posAttr.setZ(i, Math.max(-0.4, ridge * blend));
+      }
+    }
+    groundGeo.computeVertexNormals();
+
+    const ground = new THREE.Mesh(groundGeo, ProceduralMeshFactory.materials.weatheredConcrete);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.rootGroup.add(ground);
 
-    // Central Walkway
-    const walkwayGeo = new THREE.PlaneGeometry(8, 54);
-    const walkwayMat = new THREE.MeshStandardMaterial({
-      color: spec.terrain.walkwayColor,
-      roughness: 0.45,
-      metalness: 0.75,
-    });
-    const walkway = new THREE.Mesh(walkwayGeo, walkwayMat);
-    walkway.rotation.x = -Math.PI / 2;
-    walkway.position.set(0, 0.04, 0);
-    walkway.receiveShadow = true;
-    this.rootGroup.add(walkway);
+    // 2. Heavy Industrial Steel Foundation Pads (Dark diamond-tread steel plates with subtle iron curbing — NO giant orange gears!)
+    const foundationPads: [number, number, number][] = [
+      [0, 11, 5.2],     // Awakening Pad
+      [0, -2, 6.5],     // Central Industrial Yard Junction
+      [0, -16, 6.0],    // Open Research Outpost Pad
+      [12, -4, 5.2],    // East High-Voltage Substation Yard
+      [-12, 5, 5.0],    // West Steam & Automaton Yard
+    ];
 
-    // Hazard strips along walkway
-    if (spec.terrain.hasHazardStrips) {
-      const stripMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.5 });
-      [-3.9, 3.9].forEach((sx) => {
-        const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 54), stripMat);
-        strip.rotation.x = -Math.PI / 2;
-        strip.position.set(sx, 0.05, 0);
-        this.rootGroup.add(strip);
-      });
-    }
+    foundationPads.forEach(([px, pz, radius]) => {
+      const disc = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius + 0.35, 0.06, 16),
+        ProceduralMeshFactory.materials.diamondTread
+      );
+      disc.position.set(px, 0.03, pz);
+      disc.receiveShadow = true;
+      this.rootGroup.add(disc);
 
-    // Handrails with safety posts
-    const railMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.9, roughness: 0.3 });
-    [-4.1, 4.1].forEach((rx) => {
-      for (let rz = -22; rz <= 20; rz += 5) {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8), railMat);
-        post.position.set(rx, 0.55, rz);
-        post.castShadow = true;
-        this.rootGroup.add(post);
-      }
-      const topBar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 44), railMat);
-      topBar.position.set(rx, 1.1, -1);
-      topBar.castShadow = true;
-      this.rootGroup.add(topBar);
+      // Subtle dark cast-iron curb ring embedded flush in the ground
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(radius, 0.06, 8, 24),
+        ProceduralMeshFactory.materials.darkChassis
+      );
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(px, 0.04, pz);
+      this.rootGroup.add(rim);
     });
 
-    // Awakening Pod (Where the robot wakes up at z = 14)
+    // 3. Undulating Low Terrain Earth & Slag Berms around the field (breaks up flat ground naturally, no colliders)
+    const bermSpecs: [number, number, number, number, number][] = [
+      [-19, -0.35, 9, 6.5, 0.9],
+      [20, -0.35, -9, 7.2, 1.0],
+      [-22, -0.4, -17, 8.0, 1.1],
+      [22, -0.4, 15, 7.5, 1.0],
+      [-8, -0.35, 25, 6.8, 0.85],
+      [11, -0.35, 27, 7.0, 0.95],
+    ];
+    bermSpecs.forEach(([bx, by, bz, rad, h]) => {
+      const berm = new THREE.Mesh(
+        new THREE.SphereGeometry(rad, 12, 8),
+        ProceduralMeshFactory.materials.weatheredConcrete
+      );
+      berm.position.set(bx, by, bz);
+      berm.scale.set(1.3, h / rad, 1.0);
+      berm.receiveShadow = true;
+      this.rootGroup.add(berm);
+    });
+
+    // 4. 10 COLOSSAL CRAGGY SCRAP MOUNTAINS & SLAG RIDGES (8m-14m tall) framing the entire valley!
+    const scrapMountainSpecs: [number, number, number, number, number, number][] = [
+      // [x, y, z, radius, height, rotY]
+      [-38, 0, 14, 13, 10.5, 0.4],
+      [-36, 0, -22, 14, 11.5, 1.2],
+      [38, 0, 12, 13, 10.0, -0.6],
+      [37, 0, -22, 14, 12.0, -1.4],
+      [-24, 0, 34, 12, 9.5, 0.8],
+      [25, 0, 35, 12.5, 10.0, -0.9],
+      [0, 0, 40, 15, 11.5, 0.2],
+      [-42, 0, -3, 12, 9.8, 1.7],
+      [42, 0, -4, 12.5, 10.2, -1.5],
+      [-18, 0, -36, 13, 11.0, 0.5],
+    ];
+
+    scrapMountainSpecs.forEach(([mx, my, mz, rad, h, rotY]) => {
+      const mountain = ProceduralMeshFactory.createScrapMountain(
+        new THREE.Vector3(mx, my, mz),
+        rad,
+        h,
+        rotY
+      );
+      this.rootGroup.add(mountain);
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3(mx - rad * 0.7, 0, mz - rad * 0.7),
+          new THREE.Vector3(mx + rad * 0.7, h, mz + rad * 0.7)
+        )
+      );
+    });
+
+    // 5. Outer Valley Boundary Cliffs at +-84m
+    const halfW = w / 2 - 4;
+    const halfD = d / 2 - 4;
+    const h = spec.terrain.wallHeight;
+    const boundPositions = [
+      { x: 0, z: halfD, w: w, d: 4 },
+      { x: 0, z: -halfD, w: w, d: 4 },
+      { x: -halfW, z: 0, w: 4, d: d },
+      { x: halfW, z: 0, w: 4, d: d },
+    ];
+    boundPositions.forEach((b) => {
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3(b.x - b.w / 2, 0, b.z - b.d / 2),
+          new THREE.Vector3(b.x + b.w / 2, h, b.z + b.d / 2)
+        )
+      );
+    });
+
+    // 6. Subtle Awakening Pad Marker (z = 11, x = 0)
     const podGroup = new THREE.Group();
-    podGroup.position.set(0, 0, 14);
-
-    const podBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.4, 2.7, 0.4, 16),
-      new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.85, roughness: 0.35 })
-    );
-    podBase.position.y = 0.2;
-    podBase.receiveShadow = true;
-    podGroup.add(podBase);
-
+    podGroup.position.set(0, 0, 11);
     const podRing = new THREE.Mesh(
-      new THREE.TorusGeometry(2.1, 0.09, 8, 32),
-      new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x22d3ee, emissiveIntensity: 3.0 })
+      new THREE.TorusGeometry(2.0, 0.06, 8, 32),
+      ProceduralMeshFactory.materials.glowAmber
     );
     podRing.rotation.x = Math.PI / 2;
-    podRing.position.y = 0.42;
+    podRing.position.y = 0.07;
     podGroup.add(podRing);
-
-    const podLight = new THREE.PointLight(0x22d3ee, 2.2, 9);
-    podLight.position.set(0, 1.0, 0);
-    podGroup.add(podLight);
-
     this.rootGroup.add(podGroup);
   }
 
-  private buildCanyonWalls(spec: LevelEnvironmentSpec) {
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: spec.terrain.wallColor,
-      roughness: 0.85,
-      metalness: 0.45,
-    });
-    const rustPipeMat = new THREE.MeshStandardMaterial({ color: 0x854d0e, roughness: 0.7, metalness: 0.6 });
+  /**
+   * 2. TIER 1 (LARGE ARCHITECTURAL FORMS):
+   * Multi-Story Industrial Foundry Halls, Power Substations, Reservoir Towers & 8 Distant Horizon Factories!
+   */
+  private buildLargeBuildingsAndDistantFactories() {
+    // A. West Multi-Story Smelting Foundry & Rolling Mill Building (with sawtooth roof & twin 24m smokestacks)
+    const westFoundry = ProceduralMeshFactory.createIndustrialFoundryBuilding(
+      new THREE.Vector3(-31, 0, -6),
+      Math.PI / 2.15
+    );
+    this.rootGroup.add(westFoundry);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-38, 0, -16), new THREE.Vector3(-24, 12, 4))
+    );
 
-    const [w, d] = spec.terrain.size;
-    const halfW = w / 2 - 2;
-    const halfD = d / 2 - 2;
-    const h = spec.terrain.wallHeight;
+    // B. East High-Voltage Power Substation & Hyperboloid Cooling Tower Annex
+    const eastSubstation = ProceduralMeshFactory.createPowerSubstationBuilding(
+      new THREE.Vector3(31, 0, -5),
+      -Math.PI / 2.15
+    );
+    this.rootGroup.add(eastSubstation);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(24, 0, -14), new THREE.Vector3(38, 12, 5))
+    );
 
-    const boundPositions = [
-      { x: 0, z: halfD, w: w, d: 3 },
-      { x: 0, z: -halfD, w: w, d: 3 },
-      { x: -halfW, z: 0, w: 3, d: d },
-      { x: halfW, z: 0, w: 3, d: d },
+    // C. North-East Secondary Foundry & Boiler Works Hall
+    const northEastFoundry = ProceduralMeshFactory.createIndustrialFoundryBuilding(
+      new THREE.Vector3(24, 0, -32),
+      -0.45
+    );
+    this.rootGroup.add(northEastFoundry);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(15, 0, -39), new THREE.Vector3(33, 12, -25))
+    );
+
+    // D. 2 Towering 19m Elevated Spherical Steam/Water Reservoir Towers
+    const nwReservoir = ProceduralMeshFactory.createElevatedReservoirTower(
+      new THREE.Vector3(-25, 0, -24),
+      0.35
+    );
+    this.rootGroup.add(nwReservoir);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-28.5, 0, -27.5), new THREE.Vector3(-21.5, 16, -20.5))
+    );
+
+    const seReservoir = ProceduralMeshFactory.createElevatedReservoirTower(
+      new THREE.Vector3(26, 0, 23),
+      -0.6
+    );
+    this.rootGroup.add(seReservoir);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(22.5, 0, 19.5), new THREE.Vector3(29.5, 16, 26.5))
+    );
+
+    // E. 8 DISTANT HORIZON FACTORY COMPLEXES (at r = 64m..78m in every direction for deep discovery & scale!)
+    const distantFactorySpecs: [number, number, number, number, number][] = [
+      // [x, y, z, rotY, scale]
+      [-64, 0, -48, 0.65, 1.25],
+      [64, 0, -46, -0.65, 1.25],
+      [-72, 0, 4, 1.45, 1.3],
+      [72, 0, 6, -1.45, 1.3],
+      [-58, 0, 52, 2.35, 1.2],
+      [58, 0, 52, -2.35, 1.2],
+      [0, 0, 74, 3.14, 1.35],
+      [-34, 0, -68, 0.35, 1.25],
     ];
 
-    boundPositions.forEach((b) => {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(b.w, h, b.d), wallMat);
-      wall.position.set(b.x, h / 2, b.z);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      this.rootGroup.add(wall);
-      this.colliders.push(new THREE.Box3().setFromObject(wall));
+    distantFactorySpecs.forEach(([fx, fy, fz, rotY, sc]) => {
+      const factory = ProceduralMeshFactory.createDistantFactoryComplex(
+        new THREE.Vector3(fx, fy, fz),
+        rotY,
+        sc
+      );
+      this.rootGroup.add(factory);
+    });
+  }
 
-      // Industrial copper/rust piping along walls
-      const pipeGeo = new THREE.CylinderGeometry(0.3, 0.3, b.w > b.d ? b.w : b.d, 12);
-      const pipe = new THREE.Mesh(pipeGeo, rustPipeMat);
-      if (b.w > b.d) pipe.rotation.z = Math.PI / 2;
-      else pipe.rotation.x = Math.PI / 2;
-      pipe.position.set(b.x, h * 0.45, b.z);
+  /**
+   * 3. TIER 2 (MEDIUM INDUSTRIAL STRUCTURES):
+   * Towering 18m Harbor Hammerhead Cranes, Overhead Steel Truss Gantries & Elevated Multi-Pipe Trestle Bridges!
+   */
+  private buildCranesAndPipeNetworks() {
+    // A. 5 Towering 18m Harbor / Scrapyard Hammerhead Cranes overlooking the valley
+    const craneSpecs: [number, number, number, number, number, number][] = [
+      // [x, y, z, rotY, height, boomLength]
+      [-21, 0, 7, 1.15, 17.5, 16.5],
+      [22, 0, -14, -1.85, 18.0, 17.0],
+      [-14, 0, -24, 0.55, 16.5, 15.5],
+      [19, 0, 17, -0.85, 17.0, 16.0],
+      [-24, 0, 22, 0.95, 16.5, 15.0],
+    ];
+
+    craneSpecs.forEach(([cx, cy, cz, rotY, h, boom], idx) => {
+      const crane = ProceduralMeshFactory.createHarborHammerheadCrane(
+        new THREE.Vector3(cx, cy, cz),
+        rotY,
+        h,
+        boom
+      );
+      this.rootGroup.add(crane);
+      this.animatedCranes.push({ crane, baseRotY: rotY, phase: idx * 1.4 });
+      this.colliders.push(
+        new THREE.Box3(new THREE.Vector3(cx - 2.0, 0, cz - 2.0), new THREE.Vector3(cx + 2.0, h, cz + 2.0))
+      );
+    });
+
+    // B. 3 Heavy Overhead Industrial Truss Gantry Arches spanning work zones
+    const gantrySpecs: [number, number, number, number, number, number][] = [
+      // [x, y, z, span, height, rotY]
+      [0, 0, -9, 15, 8.2, 0],
+      [-12, 0, 2, 13, 7.6, Math.PI / 3],
+      [13, 0, -4, 13, 7.8, -Math.PI / 4],
+    ];
+    gantrySpecs.forEach(([gx, gy, gz, span, gh, rotY]) => {
+      const gantry = ProceduralMeshFactory.createOverheadGantry(
+        new THREE.Vector3(gx, gy, gz),
+        span,
+        gh
+      );
+      gantry.rotation.y = rotY;
+      this.rootGroup.add(gantry);
+    });
+
+    // C. 7 Elevated Multi-Pipe Industrial Trestle Bridges connecting buildings & machinery across the valley
+    const pipeBridges: [[number, number, number], [number, number, number], number][] = [
+      [[-25, 0, -6], [-15, 0, -3], 5.8],
+      [[-24, 0, -22], [-9, 0, -22], 6.2],
+      [[25, 0, -5], [15, 0, -6.5], 5.8],
+      [[22, 0, -26], [9.5, 0, -21], 6.0],
+      [[-15, 0, -3], [-6.5, 0, -16], 5.4],
+      [[17, 0, -14], [6.5, 0, -16], 5.4],
+      [[24, 0, 21], [10, 0, 20], 5.8],
+    ];
+    pipeBridges.forEach(([p1, p2, h]) => {
+      const bridge = ProceduralMeshFactory.createIndustrialPipeBridge(
+        new THREE.Vector3(...p1),
+        new THREE.Vector3(...p2),
+        h
+      );
+      this.rootGroup.add(bridge);
+    });
+
+    // D. Additional High-Pressure Overhead Copper Steam Conduits
+    const pipeRuns: [[number, number, number], [number, number, number]][] = [
+      [[16, 4.9, 8], [10, 4.9, -6.5]],
+      [[-16, 4.9, 14], [-7.5, 4.9, 12]],
+      [[-8, 4.9, -9], [0, 4.9, -16]],
+      [[8, 4.9, 3], [14.5, 4.9, -2]],
+    ];
+    pipeRuns.forEach(([p1, p2]) => {
+      const pipe = ProceduralMeshFactory.createSteamPipeRun(
+        new THREE.Vector3(...p1),
+        new THREE.Vector3(...p2),
+        0.24
+      );
       this.rootGroup.add(pipe);
     });
   }
 
-  private buildGantries(spec: LevelEnvironmentSpec) {
-    const count = spec.population.overheadGantryCount;
-    const zPositions = [-4, 6, 16];
+  /**
+   * 4. TIER 2 (MEDIUM FORMS - WORKING MACHINERY):
+   * Animated Reciprocating Steam Engines, Riveted Boilers & Mega Dynamo Turbines
+   */
+  private buildWorkingSteamEngines() {
+    const engineSpecs: [number, number, number, number, number, number][] = [
+      // [x, y, z, rotY, scale, speed]
+      [-15, 0, -3, 0.45, 1.15, 2.2],
+      [16, 0, 8, -0.6, 1.1, 2.5],
+      [-16, 0, 14, 0.8, 1.05, 1.9],
+      [17, 0, -14, -0.4, 1.2, 2.4],
+      [-9, 0, -22, 0.2, 1.0, 2.1],
+      [10, 0, 20, -0.9, 1.1, 2.0],
+    ];
 
-    for (let i = 0; i < Math.min(count, zPositions.length); i++) {
-      const gantry = ProceduralMeshFactory.createOverheadGantry(
-        new THREE.Vector3(0, 0, zPositions[i]),
-        14,
-        7.5
+    engineSpecs.forEach(([ex, ey, ez, rotY, scale, speed], idx) => {
+      const engine = ProceduralMeshFactory.createWorkingSteamEngine(
+        new THREE.Vector3(ex, ey, ez),
+        rotY,
+        scale
       );
-      this.rootGroup.add(gantry);
-    }
+      this.rootGroup.add(engine.group);
+
+      this.steamEngines.push({
+        flywheel: engine.flywheel,
+        driveGear: engine.driveGear,
+        pistonRod: engine.pistonRod,
+        governor: engine.governor,
+        phaseOffset: idx * 1.3,
+        speed,
+      });
+
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3(ex - 2.1 * scale, 0, ez - 1.5 * scale),
+          new THREE.Vector3(ex + 2.1 * scale, 3.5 * scale, ez + 1.5 * scale)
+        )
+      );
+    });
+
+    // Riveted Copper Steam Boilers paired with pipe runs and buildings
+    const boilerCoords: [number, number, number, number][] = [
+      [-7.5, 0, -9, 0.5],
+      [8.0, 0, 3, -0.4],
+      [-8.5, 0, 17, 1.1],
+      [9.5, 0, -21, -0.8],
+      [-21, 0, 5, 0.3],
+      [21, 0, -2, -0.5],
+    ];
+    boilerCoords.forEach(([bx, by, bz, rotY]) => {
+      const boiler = ProceduralMeshFactory.createSteampunkBoiler(new THREE.Vector3(bx, by, bz), 1.05);
+      boiler.rotation.y = rotY;
+      this.rootGroup.add(boiler);
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3(bx - 1.3, 0, bz - 1.0),
+          new THREE.Vector3(bx + 1.3, 3.2, bz + 1.0)
+        )
+      );
+    });
+
+    // 2 Colossal Steam Dynamo Turbines
+    const turbineCoords: [number, number, number, number][] = [
+      [-20, 0, -13, Math.PI / 5],
+      [21, 0, 15, -Math.PI / 4],
+    ];
+    turbineCoords.forEach(([tx, ty, tz, trotY]) => {
+      const turbine = ProceduralMeshFactory.createMegaDynamoTurbine(new THREE.Vector3(tx, ty, tz), 1.05);
+      turbine.rotation.y = trotY;
+      this.rootGroup.add(turbine);
+      this.colliders.push(
+        new THREE.Box3(new THREE.Vector3(tx - 2.3, 0, tz - 1.7), new THREE.Vector3(tx + 2.3, 3.5, tz + 1.7))
+      );
+    });
   }
 
-  private buildPopulatedProps(spec: LevelEnvironmentSpec) {
-    // 1. Robot Wrecks
+  /**
+   * 5. TIER 2 (MEDIUM FORMS - HIGH-VOLTAGE):
+   * Sparking Tesla Coils & High-Voltage Transformers with Live 3D Jagged Lightning Arcs
+   */
+  private buildSparkingTeslaCoils() {
+    const teslaSpecs: { pos: [number, number, number]; height: number }[] = [
+      // East Substation Twin Tesla Generator Array (around Quest Beacon 3 at [12, 0, -4])
+      { pos: [10.0, 0, -6.5], height: 4.4 },
+      { pos: [14.5, 0, -2.0], height: 4.4 },
+      { pos: [14.8, 0, -7.2], height: 3.9 },
+      // Coils flanking the Open Research Outpost
+      { pos: [-6.5, 0, -16.0], height: 4.0 },
+      { pos: [6.5, 0, -16.0], height: 4.0 },
+      // Coils integrated into the Scrapyard Field
+      { pos: [-13.5, 0, -12.0], height: 4.2 },
+      { pos: [-7.5, 0, 12.0], height: 3.8 },
+      { pos: [8.5, 0, 12.5], height: 3.8 },
+    ];
+
+    const topPositions: THREE.Vector3[] = [];
+
+    teslaSpecs.forEach(({ pos: [x, y, z], height }) => {
+      const tesla = ProceduralMeshFactory.createTeslaGenerator(new THREE.Vector3(x, y, z), height);
+      this.rootGroup.add(tesla);
+      this.colliders.push(
+        new THREE.Box3(new THREE.Vector3(x - 1.25, 0, z - 1.25), new THREE.Vector3(x + 1.25, height, z + 1.25))
+      );
+
+      const topY = y + height - 0.35;
+      topPositions.push(new THREE.Vector3(x, topY, z));
+    });
+
+    // High-Voltage Industrial Transformer Cabinets adjacent to the Substation & Coils
+    const transformerCoords: [number, number, number, number][] = [
+      [18.5, 0, -5.5, -0.4],
+      [17.5, 0, -9.5, -0.6],
+      [-17.5, 0, -11.0, 0.5],
+      [-5.5, 0, -20.5, 0.2],
+    ];
+    transformerCoords.forEach(([tx, ty, tz, rotY]) => {
+      const tr = ProceduralMeshFactory.createTransformer(new THREE.Vector3(tx, ty, tz));
+      tr.rotation.y = rotY;
+      this.rootGroup.add(tr);
+      this.colliders.push(
+        new THREE.Box3(new THREE.Vector3(tx - 1.2, 0, tz - 0.9), new THREE.Vector3(tx + 1.2, 3.2, tz + 0.9))
+      );
+    });
+
+    // 14 Dynamic Jagged 3D Lightning Bolts jumping between coils and grounding rods
+    const arcPairs: [THREE.Vector3, THREE.Vector3, number, boolean][] = [
+      [topPositions[0], topPositions[1], 0x38bdf8, true],
+      [topPositions[1], topPositions[2], 0xfbbf24, false],
+      [topPositions[0], topPositions[2], 0x7dd3fc, false],
+      [topPositions[0], new THREE.Vector3(12.0, 0.4, -4.2), 0x38bdf8, false],
+      [topPositions[3], new THREE.Vector3(-4.2, 1.5, -16.0), 0xfbbf24, true],
+      [topPositions[4], new THREE.Vector3(4.2, 1.5, -16.0), 0x38bdf8, true],
+      [topPositions[3], topPositions[5], 0xf59e0b, false],
+      [topPositions[5], new THREE.Vector3(-11.0, 1.2, -9.5), 0x38bdf8, true],
+      [topPositions[6], new THREE.Vector3(-5.0, 0.5, 10.5), 0xfbbf24, true],
+      [topPositions[7], new THREE.Vector3(6.0, 0.6, 10.5), 0x38bdf8, true],
+      [topPositions[0], topPositions[0].clone().add(new THREE.Vector3(-1.8, 1.2, 1.2)), 0x38bdf8, false],
+      [topPositions[1], topPositions[1].clone().add(new THREE.Vector3(1.6, 1.4, -1.4)), 0xfbbf24, false],
+      [topPositions[3], topPositions[3].clone().add(new THREE.Vector3(0.8, 1.6, 1.2)), 0x38bdf8, false],
+      [topPositions[4], topPositions[4].clone().add(new THREE.Vector3(-0.8, 1.6, 1.2)), 0xfbbf24, false],
+    ];
+
+    const mainTeslaLight = new THREE.PointLight(0x38bdf8, 3.2, 18);
+    mainTeslaLight.position.set(12.2, 3.6, -4.5);
+    this.rootGroup.add(mainTeslaLight);
+
+    arcPairs.forEach(([start, end, hexColor], idx) => {
+      const segments = 12;
+      const points: THREE.Vector3[] = [];
+      for (let i = 0; i <= segments; i++) {
+        points.push(new THREE.Vector3().lerpVectors(start, end, i / segments));
+      }
+
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      const mat = new THREE.LineBasicMaterial({
+        color: hexColor,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+      });
+      const line = new THREE.Line(geo, mat);
+      this.rootGroup.add(line);
+
+      this.lightningArcs.push({
+        line,
+        start,
+        end,
+        segments,
+        swayAmplitude: 0.42,
+        light: idx === 0 ? mainTeslaLight : undefined,
+      });
+    });
+  }
+
+  /**
+   * 6. TIER 3 (SMALL PROPS & FINE ENVIRONMENTAL DETAIL):
+   * Fallen Titan Mech Wrecks, Medium Scrap Piles, Detached Robot Assemblies & GPU-Instanced Ground Detail
+   * (Notice: NO giant floating orange gears!)
+   */
+  private buildScrapyardDetailScatter(spec: LevelEnvironmentSpec) {
+    // A. 8 Fallen Titan Automaton Wrecks across the open field
     const robotCoords: [number, number, number, number, number][] = [
-      [-8, 0.3, 7, 0.8, -0.4],
-      [9, 0.25, 12, -0.6, 1.2],
-      [-12, 0.35, -5, 1.4, 0.2],
-      [-10, 0.3, 17, 0.3, 0.6],
-      [11, 0.3, -2, -1.1, -0.3],
+      [-11, 0.3, 5, 0.8, -0.4],     // Quest Beacon 2 target!
+      [6, 0.25, 7, -0.6, 1.2],
+      [-15, 0.35, -8, 1.4, 0.2],
+      [-13, 0.3, 19, 0.3, 0.6],
+      [14, 0.3, 2, -1.1, -0.3],
+      [-5, 0.3, -9, 2.1, 0.4],
+      [7, 0.3, -10, -1.5, -0.5],
+      [19, 0.3, -8, 0.7, 0.8],
     ];
     for (let i = 0; i < Math.min(spec.population.robotWrecksCount, robotCoords.length); i++) {
       const [x, y, z, ry, rz] = robotCoords[i];
-      const bot = ProceduralMeshFactory.createRobotWreck(
+      const bot = ProceduralMeshFactory.createTitanMechWreck(
         new THREE.Vector3(x, y, z),
-        new THREE.Euler(0.3, ry, rz)
+        new THREE.Euler(0.3, ry, rz),
+        1.1
       );
       this.rootGroup.add(bot);
-      this.colliders.push(new THREE.Box3().setFromObject(bot));
-    }
-
-    // 2. High-Voltage Tesla Generators
-    const teslaCoords: [number, number, number][] = [
-      [-7, 0, 15],
-      [7, 0, 15],
-      [-11, 0, -2],
-      [11, 0, -2],
-    ];
-    for (let i = 0; i < Math.min(spec.population.inductionCoilsCount, teslaCoords.length); i++) {
-      const [x, y, z] = teslaCoords[i];
-      const tesla = ProceduralMeshFactory.createTeslaGenerator(new THREE.Vector3(x, y, z), 3.8);
-      this.rootGroup.add(tesla);
-      this.colliders.push(new THREE.Box3().setFromObject(tesla));
-    }
-
-    // 3. Transformer Substations
-    const transCoords: [number, number, number][] = [
-      [-12, 0, 4],
-      [12, 0, 5],
-    ];
-    for (let i = 0; i < Math.min(spec.population.transformersCount, transCoords.length); i++) {
-      const [x, y, z] = transCoords[i];
-      const trans = ProceduralMeshFactory.createTransformer(new THREE.Vector3(x, y, z));
-      this.rootGroup.add(trans);
-      this.colliders.push(new THREE.Box3().setFromObject(trans));
-    }
-
-    // 4. Steam Pipes
-    const pipe = ProceduralMeshFactory.createSteamPipeRun(
-      new THREE.Vector3(-14, 2.5, 8),
-      new THREE.Vector3(-4.5, 2.5, 8),
-      0.22
-    );
-    this.rootGroup.add(pipe);
-
-    // 5. Giant Cogwheels
-    const cogCoords: [number, number, number, number, number, number][] = [
-      [-10, 1.8, 6, 2.8, 0.4, 0.6],
-      [12, 2.4, 7, 3.4, -0.5, -0.4],
-      [-8, 1.6, -1, 2.2, 0.3, 0.8],
-    ];
-    cogCoords.forEach(([cx, cy, cz, r, rx, rz]) => {
-      const gear = new THREE.Mesh(
-        new THREE.CylinderGeometry(r, r, 0.3, 16),
-        new THREE.MeshStandardMaterial({ color: 0xc99a3d, roughness: 0.45, metalness: 0.85 })
+      this.colliders.push(
+        new THREE.Box3(new THREE.Vector3(x - 1.1, 0, z - 1.1), new THREE.Vector3(x + 1.1, 2.2, z + 1.1))
       );
-      gear.position.set(cx, cy, cz);
-      gear.rotation.set(rx, 0, rz);
-      gear.castShadow = true;
-      gear.receiveShadow = true;
-      this.rootGroup.add(gear);
-      this.rotatingGears.push(gear);
-      this.colliders.push(new THREE.Box3().setFromObject(gear));
+    }
+
+    // B. 12 Medium Industrial Scrap Mounds (Slag, I-beams, crushed tanks, hull plates) at the foot of buildings/cranes
+    const scrapHeapCoords: [number, number, number, number, number][] = [
+      [-18, 0, 2, 0.5, 1.25],
+      [19, 0, 4, -0.4, 1.2],
+      [-11, 0, -14, 0.8, 1.25],
+      [11, 0, -13, -0.7, 1.2],
+      [-16, 0, -21, 0.2, 1.35],
+      [16, 0, -21, -0.5, 1.35],
+      [-10, 0, 22, 1.1, 1.15],
+      [11, 0, 23, -0.9, 1.15],
+      [-23, 0, -5, 0.4, 1.3],
+      [23, 0, -9, -0.6, 1.3],
+      [-22, 0, 12, 1.5, 1.2],
+      [22, 0, 11, -1.2, 1.2],
+    ];
+    scrapHeapCoords.forEach(([sx, sy, sz, rotY, sc]) => {
+      const pile = ProceduralMeshFactory.createScrapPile(new THREE.Vector3(sx, sy, sz), rotY, sc);
+      this.rootGroup.add(pile);
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3(sx - 1.65 * sc, 0, sz - 1.4 * sc),
+          new THREE.Vector3(sx + 1.65 * sc, 2.4 * sc, sz + 1.4 * sc)
+        )
+      );
     });
 
-    // 6. Streetlamps with warm sodium glow
-    [[-4.8, 4], [4.8, 4], [-4.8, -4], [4.8, -4]].forEach(([lx, lz]) => {
+    // C. Balanced GPU-Instanced Ground Detail Scatter (I-beams, pipes, hull slabs, oil drums, robot parts, subtle dark-bronze cogs)
+    const instancedParts = ProceduralMeshFactory.createInstancedScrapyardParts();
+    this.rootGroup.add(instancedParts);
+
+    // D. 16 Close-Up Detached Robot Assemblies around the walkable yards
+    const robotAssemblySpecs: [number, number, number, 'head_cluster' | 'claw_arm' | 'ribcage_core' | 'hydraulic_leg', number, number][] = [
+      [-3.5, 0, 8.2, 'head_cluster', 0.6, 1.15],
+      [3.8, 0, 7.5, 'claw_arm', -0.8, 1.2],
+      [-4.8, 0, 2.8, 'ribcage_core', 1.2, 1.1],
+      [4.6, 0, 3.2, 'hydraulic_leg', -0.4, 1.15],
+      [-3.2, 0, -4.5, 'claw_arm', 2.1, 1.2],
+      [3.4, 0, -5.2, 'head_cluster', -1.3, 1.15],
+      [-5.2, 0, -10.5, 'hydraulic_leg', 0.9, 1.2],
+      [5.0, 0, -11.0, 'ribcage_core', -0.7, 1.15],
+      [-8.5, 0, 6.8, 'head_cluster', 1.5, 1.25],
+      [-9.2, 0, 1.2, 'claw_arm', -1.8, 1.2],
+      [8.5, 0, -1.8, 'ribcage_core', 0.4, 1.2],
+      [9.5, 0, -7.8, 'hydraulic_leg', 1.9, 1.25],
+      [-3.5, 0, -19.5, 'head_cluster', 0.3, 1.15],
+      [3.6, 0, -19.2, 'claw_arm', -0.5, 1.2],
+      [-1.8, 0, 14.5, 'ribcage_core', 1.1, 1.15],
+      [2.4, 0, 14.8, 'hydraulic_leg', -1.2, 1.15],
+    ];
+    robotAssemblySpecs.forEach(([rx, ry, rz, kind, rotY, sc]) => {
+      const assembly = ProceduralMeshFactory.createDetachedRobotAssembly(
+        new THREE.Vector3(rx, ry, rz),
+        kind,
+        rotY,
+        sc
+      );
+      this.rootGroup.add(assembly);
+    });
+
+    // E. Industrial Yard Streetlanterns
+    const lanternCoords: [number, number][] = [
+      [-5.5, 11], [5.5, 11],
+      [-7.5, 2], [7.5, 2],
+      [-7.5, -7], [7.5, -7],
+      [-5.8, -15], [5.8, -15],
+      [11, 1], [-12, -2],
+    ];
+    lanternCoords.forEach(([lx, lz]) => {
       const lamp = this.createStreetlamp(lx, 0, lz);
       this.rootGroup.add(lamp);
     });
-
-    // 7. Signs: "↑ UNDERWORLD" and "JUNKYARD"
-    this.buildSignboards();
   }
 
   private createStreetlamp(x: number, y: number, z: number): THREE.Group {
     const lampGroup = new THREE.Group();
     lampGroup.position.set(x, y, z);
 
-    const metalMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.9, roughness: 0.3 });
-    const brassMat = new THREE.MeshStandardMaterial({ color: 0xb87333, metalness: 0.85, roughness: 0.3 });
+    const metalMat = ProceduralMeshFactory.materials.darkChassis;
+    const brassMat = ProceduralMeshFactory.materials.brass;
 
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 4.4, 8), metalMat);
-    pole.position.y = 2.2;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.13, 4.5, 8), metalMat);
+    pole.position.y = 2.25;
     pole.castShadow = true;
     lampGroup.add(pole);
 
-    const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.65, 0.45), brassMat);
-    lantern.position.set(0, 4.3, 0);
+    const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.64, 0.46), brassMat);
+    lantern.position.set(0, 4.4, 0);
     lampGroup.add(lantern);
 
     const bulb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 10, 10),
-      new THREE.MeshStandardMaterial({ color: 0xffb52e, emissive: 0xffb52e, emissiveIntensity: 3.5 })
+      new THREE.SphereGeometry(0.2, 10, 10),
+      ProceduralMeshFactory.materials.glowAmber
     );
-    bulb.position.set(0, 4.2, 0);
+    bulb.position.set(0, 4.3, 0);
     lampGroup.add(bulb);
 
-    const light = new THREE.PointLight(0xffb52e, 2.2, 15);
-    light.position.set(0, 4.1, 0);
-    lampGroup.add(light);
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(0.68, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: 0xffb52e,
+        transparent: true,
+        opacity: 0.18,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    halo.position.set(0, 4.3, 0);
+    lampGroup.add(halo);
 
     this.colliders.push(
-      new THREE.Box3(new THREE.Vector3(x - 0.3, 0, z - 0.3), new THREE.Vector3(x + 0.3, 4.4, z + 0.3))
+      new THREE.Box3(new THREE.Vector3(x - 0.22, 0, z - 0.22), new THREE.Vector3(x + 0.22, 4.5, z + 0.22))
     );
 
     return lampGroup;
   }
 
-  private buildSignboards() {
-    // Arrow Sign ("↑ UNDERWORLD")
-    const signGroup = new THREE.Group();
-    signGroup.position.set(4.8, 0.7, 7);
-
-    const signBoard = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6, 0.9, 0.15),
-      new THREE.MeshStandardMaterial({ color: 0x1e242c, metalness: 0.9, roughness: 0.35 })
-    );
-    signBoard.castShadow = true;
-    signGroup.add(signBoard);
-
-    const signArrow = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 0.5, 0.08),
-      new THREE.MeshStandardMaterial({ color: 0xffb52e, emissive: 0xffb52e, emissiveIntensity: 3.5, roughness: 0.2 })
-    );
-    signArrow.position.set(0, 0, 0.09);
-    signGroup.add(signArrow);
-
-    const signLight = new THREE.PointLight(0xffb52e, 2.0, 7);
-    signLight.position.set(0, 0, 0.5);
-    signGroup.add(signLight);
-
-    this.rootGroup.add(signGroup);
-    this.colliders.push(new THREE.Box3().setFromObject(signBoard));
-
-    // Neon Sign ("JUNKYARD")
-    const neonGroup = new THREE.Group();
-    neonGroup.position.set(-6.0, 3.2, 8);
-    neonGroup.rotation.y = 0.35;
-
-    const neonFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(3.6, 1.2, 0.25),
-      new THREE.MeshStandardMaterial({ color: 0x111827 })
-    );
-    neonFrame.castShadow = true;
-    neonGroup.add(neonFrame);
-
-    const neonLetters = new THREE.Mesh(
-      new THREE.BoxGeometry(3.0, 0.75, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0xf43f5e, emissive: 0xf43f5e, emissiveIntensity: 4.0, roughness: 0.1 })
-    );
-    neonLetters.position.z = 0.14;
-    neonGroup.add(neonLetters);
-
-    const neonLight = new THREE.PointLight(0xf43f5e, 2.8, 12);
-    neonLight.position.set(0, 0, 0.8);
-    neonGroup.add(neonLight);
-
-    this.rootGroup.add(neonGroup);
-  }
-
+  /**
+   * 7. TIER 1 NORTHERN LANDMARK: Colossal Industrial Blast-Furnace & Power Spire Citadel
+   * Replaces giant floating gears with heavy steel lattice columns, blast-furnace silos,
+   * structural catwalks, and integrated dark-bronze turbine drive wheels!
+   */
   private buildTowerBackdrop() {
     const towerGroup = new THREE.Group();
-    towerGroup.position.set(0, 0, -26);
+    towerGroup.position.set(0, 0, -42);
+    const m = ProceduralMeshFactory.materials;
 
-    // Central Luminous Elevator Beam
-    const beamGeo = new THREE.CylinderGeometry(1.8, 2.0, 90, 24);
+    // 1. Massive Foundry Citadel Base Block
+    const citadelBase = new THREE.Mesh(new THREE.BoxGeometry(34, 14, 24), m.foundryBrick);
+    citadelBase.position.y = 7;
+    citadelBase.castShadow = true;
+    citadelBase.receiveShadow = true;
+    towerGroup.add(citadelBase);
+
+    // Illuminated industrial furnace slit windows across the citadel base
+    for (let wx = -13; wx <= 13; wx += 6.5) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(2.4, 4.5, 24.3), m.glowAmber);
+      win.position.set(wx, 8.0, 0);
+      towerGroup.add(win);
+    }
+
+    // 2. Central Vertical Energy Conduit Core
+    const beamGeo = new THREE.CylinderGeometry(1.5, 1.9, 95, 20);
     const beamMat = new THREE.MeshStandardMaterial({
-      color: 0x22d3ee,
-      emissive: 0x22d3ee,
-      emissiveIntensity: 3.0,
+      color: 0xfbbf24,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 2.6,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.82,
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
-    beam.position.y = 45;
+    beam.position.y = 47.5;
     towerGroup.add(beam);
     this.centralElevatorBeam = beam;
 
-    const coreLight = new THREE.PointLight(0x22d3ee, 4.0, 50);
-    coreLight.position.set(0, 20, 0);
+    const coreLight = new THREE.PointLight(0xf59e0b, 3.8, 55);
+    coreLight.position.set(0, 20, 8);
     towerGroup.add(coreLight);
 
-    // Vertical Support Columns
-    [[-18, -18], [18, -18], [-18, 18], [18, 18]].forEach(([px, pz]) => {
+    // 3. 4 Colossal Gunmetal Steel Pylon Columns & Cross-Girder Trusses
+    [[-14, -10], [14, -10], [-14, 10], [14, 10]].forEach(([px, pz]) => {
       const col = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.4, 1.8, 95, 12),
-        new THREE.MeshStandardMaterial({ color: 0x1f242b, metalness: 0.9, roughness: 0.35 })
+        new THREE.CylinderGeometry(1.6, 2.1, 90, 12),
+        m.darkChassis
       );
-      col.position.set(px, 47.5, pz);
+      col.position.set(px, 45, pz);
       col.castShadow = true;
       towerGroup.add(col);
     });
 
-    // Tier 2: Static Research (y = 10, violet)
-    const tier2Ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(22, 24, 2.0, 36),
-      new THREE.MeshStandardMaterial({ color: 0x2e1065, metalness: 0.85, roughness: 0.3 })
-    );
-    tier2Ring.position.y = 10;
-    tier2Ring.castShadow = true;
-    towerGroup.add(tier2Ring);
+    // Flanking Cylindrical Blast-Furnace Stoves & Vertical Piping
+    [-20, 20].forEach((sx) => {
+      const stove = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.8, 32, 16), m.rustIron);
+      stove.position.set(sx, 16, 2);
+      stove.castShadow = true;
+      towerGroup.add(stove);
 
-    const tier2GlowRim = new THREE.Mesh(
-      new THREE.TorusGeometry(23, 0.45, 8, 40),
-      new THREE.MeshStandardMaterial({ color: 0x8b5cf6, emissive: 0x8b5cf6, emissiveIntensity: 3.8 })
-    );
-    tier2GlowRim.rotation.x = Math.PI / 2;
-    tier2GlowRim.position.y = 11;
-    towerGroup.add(tier2GlowRim);
-    this.towerRings.push(tier2GlowRim);
+      const stoveDome = new THREE.Mesh(new THREE.SphereGeometry(3.4, 14, 10), m.copper);
+      stoveDome.position.set(sx, 32, 2);
+      towerGroup.add(stoveDome);
+    });
 
-    // Tier 3: Circuit Lab (y = 21, cyan)
-    const tier3Ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(20, 21, 2.0, 36),
-      new THREE.MeshStandardMaterial({ color: 0x083344, metalness: 0.85, roughness: 0.3 })
-    );
-    tier3Ring.position.y = 21;
-    tier3Ring.castShadow = true;
-    towerGroup.add(tier3Ring);
+    // 4. Integrated Dark-Bronze Mechanical Drive Wheels housed inside the Lower Machinery Deck
+    const driveWheelL = ProceduralMeshFactory.createTrueToothedGear(5.2, 0.8, 18, 'bronze', 6);
+    driveWheelL.position.set(-14, 17, 10.8);
+    towerGroup.add(driveWheelL);
+    this.rotatingGears.push({ gear: driveWheelL, speed: 0.14, axis: 'z' });
 
-    const tier3GlowRim = new THREE.Mesh(
-      new THREE.TorusGeometry(20.5, 0.4, 8, 40),
-      new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x22d3ee, emissiveIntensity: 3.8 })
-    );
-    tier3GlowRim.rotation.x = Math.PI / 2;
-    tier3GlowRim.position.y = 22;
-    towerGroup.add(tier3GlowRim);
-    this.towerRings.push(tier3GlowRim);
+    const driveWheelR = ProceduralMeshFactory.createTrueToothedGear(5.2, 0.8, 18, 'bronze', 6);
+    driveWheelR.position.set(14, 17, 10.8);
+    towerGroup.add(driveWheelR);
+    this.rotatingGears.push({ gear: driveWheelR, speed: -0.14, axis: 'z' });
 
-    // Tier 4: Power Plant (y = 33, amber)
-    const tier4Ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(18, 19, 2.0, 36),
-      new THREE.MeshStandardMaterial({ color: 0x451a03, metalness: 0.9, roughness: 0.3 })
-    );
-    tier4Ring.position.y = 33;
-    tier4Ring.castShadow = true;
-    towerGroup.add(tier4Ring);
+    // 5. Structural Industrial Tier Platforms & Catwalk Rings
+    const tiers: [number, number, number, THREE.Material][] = [
+      [16, 19, 21, m.glowAmber],
+      [28, 17, 18, m.glowCyan],
+      [40, 15, 16, m.glowAmber],
+      [52, 13, 14, m.glowViolet],
+    ];
 
-    const tier4GlowRim = new THREE.Mesh(
-      new THREE.TorusGeometry(18.5, 0.4, 8, 40),
-      new THREE.MeshStandardMaterial({ color: 0xffb52e, emissive: 0xffb52e, emissiveIntensity: 3.5 })
-    );
-    tier4GlowRim.rotation.x = Math.PI / 2;
-    tier4GlowRim.position.y = 34;
-    towerGroup.add(tier4GlowRim);
-    this.towerRings.push(tier4GlowRim);
+    tiers.forEach(([ty, rTop, rBot, glowMat]) => {
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(rTop, rBot, 2.4, 24),
+        m.darkChassis
+      );
+      ring.position.y = ty;
+      ring.castShadow = true;
+      towerGroup.add(ring);
 
-    // Tier 5: Research District (y = 45, teal)
-    const tier5Ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(16, 17, 2.0, 36),
-      new THREE.MeshStandardMaterial({ color: 0x134e4a, metalness: 0.85, roughness: 0.3 })
-    );
-    tier5Ring.position.y = 45;
-    tier5Ring.castShadow = true;
-    towerGroup.add(tier5Ring);
+      const glowRim = new THREE.Mesh(new THREE.TorusGeometry(rTop + 0.35, 0.25, 8, 36), glowMat);
+      glowRim.rotation.x = Math.PI / 2;
+      glowRim.position.y = ty + 0.8;
+      towerGroup.add(glowRim);
+      this.towerRings.push(glowRim);
+    });
 
-    // Tier 6: Sky City Base & Spire Spires (y = 59 to 85)
-    const skyCityBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(26, 18, 5, 36),
-      new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.9, roughness: 0.15 })
+    // 6. Upper Citadel Smokestacks & Industrial Crown
+    const crownBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(18, 14, 4.5, 24),
+      m.weatheredPlating
     );
-    skyCityBase.position.y = 59;
-    skyCityBase.castShadow = true;
-    towerGroup.add(skyCityBase);
+    crownBase.position.y = 62;
+    towerGroup.add(crownBase);
 
-    const spireHeights = [22, 30, 26, 18, 34, 24];
+    const spireHeights = [18, 26, 22, 16, 28, 20];
     spireHeights.forEach((h, idx) => {
       const angle = (idx * Math.PI * 2) / spireHeights.length;
-      const r = 9 + (idx % 2) * 5;
+      const r = 8 + (idx % 2) * 3.5;
       const sx = Math.cos(angle) * r;
       const sz = Math.sin(angle) * r;
 
       const spire = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 2.0, h, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9, roughness: 0.15 })
+        new THREE.CylinderGeometry(0.75, 1.4, h, 10),
+        m.darkChassis
       );
-      spire.position.set(sx, 61 + h / 2, sz);
-      spire.castShadow = true;
+      spire.position.set(sx, 64 + h / 2, sz);
       towerGroup.add(spire);
-
-      const tip = new THREE.Mesh(
-        new THREE.SphereGeometry(0.5, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 4.5 })
-      );
-      tip.position.set(sx, 61 + h + 0.5, sz);
-      towerGroup.add(tip);
     });
 
     this.rootGroup.add(towerGroup);
   }
 
-  private buildFacility(spec: LevelEnvironmentSpec) {
-    const labGroup = new THREE.Group();
+  /**
+   * 8. Open-Air Steampunk Research Outpost ("SZABAD ÉG ALATTI KUTATÓ ÁLLOMÁS")
+   */
+  private buildSteampunkOutpost(spec: LevelEnvironmentSpec) {
     const [fx, fy, fz] = spec.facility.position;
-    labGroup.position.set(fx, fy, fz);
+    const outpostPos = new THREE.Vector3(fx, fy, fz);
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x242c38, roughness: 0.5, metalness: 0.75 });
-    const copperTrimMat = new THREE.MeshStandardMaterial({ color: 0xb87333, roughness: 0.35, metalness: 0.85 });
+    // 1. Open-Air Steampunk Laboratory Workbench
+    const workbenchGroup = ProceduralMeshFactory.createOpenSteampunkWorkbench(outpostPos);
+    this.rootGroup.add(workbenchGroup);
 
-    const bW = spec.facility.width;
-    const bH = spec.facility.height;
-    const bD = spec.facility.depth;
-    const doorW = 4.4;
-    const doorH = 3.8;
-
-    // Walls
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(bW, bH, 0.8), wallMat);
-    backWall.position.set(0, bH / 2, -bD / 2);
-    backWall.castShadow = true;
-    backWall.receiveShadow = true;
-    labGroup.add(backWall);
-    this.colliders.push(new THREE.Box3().setFromObject(backWall));
-
-    const westWall = new THREE.Mesh(new THREE.BoxGeometry(0.8, bH, bD), wallMat);
-    westWall.position.set(-bW / 2, bH / 2, 0);
-    westWall.castShadow = true;
-    westWall.receiveShadow = true;
-    labGroup.add(westWall);
-    this.colliders.push(new THREE.Box3().setFromObject(westWall));
-
-    const eastWall = new THREE.Mesh(new THREE.BoxGeometry(0.8, bH, bD), wallMat);
-    eastWall.position.set(bW / 2, bH / 2, 0);
-    eastWall.castShadow = true;
-    eastWall.receiveShadow = true;
-    labGroup.add(eastWall);
-    this.colliders.push(new THREE.Box3().setFromObject(eastWall));
-
-    // Front Wall Left & Right
-    const frontWallLeftW = (bW - doorW) / 2;
-    const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry(frontWallLeftW, bH, 0.8), wallMat);
-    frontWallLeft.position.set(-bW / 2 + frontWallLeftW / 2, bH / 2, bD / 2);
-    frontWallLeft.castShadow = true;
-    labGroup.add(frontWallLeft);
-    this.colliders.push(new THREE.Box3().setFromObject(frontWallLeft));
-
-    const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry(frontWallLeftW, bH, 0.8), wallMat);
-    frontWallRight.position.set(bW / 2 - frontWallLeftW / 2, bH / 2, bD / 2);
-    frontWallRight.castShadow = true;
-    labGroup.add(frontWallRight);
-    this.colliders.push(new THREE.Box3().setFromObject(frontWallRight));
-
-    // Lintel
-    const lintelH = bH - doorH;
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorW + 0.6, lintelH, 0.8), copperTrimMat);
-    lintel.position.set(0, doorH + lintelH / 2, bD / 2);
-    labGroup.add(lintel);
-
-    // Glowing Entrance Signboard
-    const signMat = new THREE.MeshStandardMaterial({
-      color: spec.facility.signColor,
-      emissive: spec.facility.signColor,
-      emissiveIntensity: 3.5,
-      roughness: 0.1,
-    });
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.9, 0.25), signMat);
-    sign.position.set(0, doorH + 0.65, bD / 2 + 0.45);
-    labGroup.add(sign);
-
-    const signLight = new THREE.PointLight(spec.facility.signColor, 2.8, 11);
-    signLight.position.set(0, doorH + 0.65, bD / 2 + 1.4);
-    labGroup.add(signLight);
-
-    // Sliding Blast Doors
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.35 });
-    this.labDoorLeft = new THREE.Mesh(new THREE.BoxGeometry(doorW / 2, doorH, 0.2), doorMat);
-    this.labDoorLeft.position.set(-doorW / 4, doorH / 2, bD / 2);
-    this.labDoorLeft.castShadow = true;
-    labGroup.add(this.labDoorLeft);
-
-    this.labDoorRight = new THREE.Mesh(new THREE.BoxGeometry(doorW / 2, doorH, 0.2), doorMat);
-    this.labDoorRight.position.set(doorW / 4, doorH / 2, bD / 2);
-    this.labDoorRight.castShadow = true;
-    labGroup.add(this.labDoorRight);
-
-    // Roof
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(bW + 0.6, 0.4, bD + 0.6), wallMat);
-    roof.position.set(0, bH + 0.2, 0);
-    roof.castShadow = true;
-    labGroup.add(roof);
-
-    // Interior Laboratory Workbench
-    if (spec.facility.hasInteriorWorkbench) {
-      this.buildInteriorWorkbench(labGroup);
-    }
-
-    this.rootGroup.add(labGroup);
-  }
-
-  private buildInteriorWorkbench(labGroup: THREE.Group) {
-    // Epoxy floor inside lab
-    const floorGeo = new THREE.PlaneGeometry(15, 19);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x080b0d, roughness: 0.15, metalness: 0.7 });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0.04;
-    floor.receiveShadow = true;
-    labGroup.add(floor);
-
-    // Holographic floor ring
-    const decalRing = new THREE.Mesh(
-      new THREE.RingGeometry(2.5, 2.8, 36),
-      new THREE.MeshStandardMaterial({
-        color: 0x8b5cf6,
-        emissive: 0x8b5cf6,
-        emissiveIntensity: 2.2,
-        side: THREE.DoubleSide,
-      })
-    );
-    decalRing.rotation.x = -Math.PI / 2;
-    decalRing.position.set(0, 0.05, 0);
-    labGroup.add(decalRing);
-
-    // Workbench Table
-    const tableTop = new THREE.Mesh(
-      new THREE.BoxGeometry(3.8, 0.22, 2.4),
-      new THREE.MeshStandardMaterial({ color: 0x272e3b, metalness: 0.8, roughness: 0.3 })
-    );
-    tableTop.position.set(0, 1.0, 0);
-    tableTop.castShadow = true;
-    tableTop.receiveShadow = true;
-    labGroup.add(tableTop);
-
-    // Legs
-    const legGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.0, 8);
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x111418, metalness: 0.9 });
-    [[-1.7, -1.0], [1.7, -1.0], [-1.7, 1.0], [1.7, 1.0]].forEach(([lx, lz]) => {
-      const leg = new THREE.Mesh(legGeo, legMat);
-      leg.position.set(lx, 0.5, lz);
-      leg.castShadow = true;
-      labGroup.add(leg);
-    });
-
-    // Terminal Screen
-    const terminalScreen = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.9, 0.1),
-      new THREE.MeshStandardMaterial({
-        color: 0x22d3ee,
-        emissive: 0x22d3ee,
-        emissiveIntensity: 2.2,
-        roughness: 0.1,
-      })
-    );
-    terminalScreen.position.set(0, 1.65, -0.85);
-    terminalScreen.rotation.x = -0.15;
-    labGroup.add(terminalScreen);
-
-    // Floating Holographic Atom Model
+    // 2. Floating Holographic Atom Model directly above workbench
     const holoAtom = new THREE.Group();
-    holoAtom.position.set(0, 2.7, 0);
+    holoAtom.position.set(fx, fy + 2.75, fz);
 
     const nucleus = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 14, 14),
-      new THREE.MeshStandardMaterial({ color: 0xffb52e, emissive: 0xffb52e, emissiveIntensity: 2.5 })
+      new THREE.SphereGeometry(0.24, 14, 14),
+      ProceduralMeshFactory.materials.glowAmber
     );
     holoAtom.add(nucleus);
 
     for (let r = 0; r < 3; r++) {
       const orbitRing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.75 + r * 0.22, 0.02, 8, 36),
-        new THREE.MeshStandardMaterial({
-          color: 0x8b5cf6,
-          emissive: 0x8b5cf6,
-          emissiveIntensity: 2.0,
-          transparent: true,
-          opacity: 0.85,
-        })
+        new THREE.TorusGeometry(0.75 + r * 0.22, 0.025, 8, 36),
+        r % 2 === 0 ? ProceduralMeshFactory.materials.glowAmber : ProceduralMeshFactory.materials.glowCyan
       );
       orbitRing.rotation.x = (r * Math.PI) / 3;
       orbitRing.rotation.y = (r * Math.PI) / 4;
       holoAtom.add(orbitRing);
     }
-
-    labGroup.add(holoAtom);
+    this.rootGroup.add(holoAtom);
     this.holoAtom = holoAtom;
 
-    const benchSpot = new THREE.SpotLight(0x22d3ee, 4.0, 7, Math.PI / 4, 0.4);
-    benchSpot.position.set(0, 3.2, 0);
-    benchSpot.target = tableTop;
-    labGroup.add(benchSpot);
-
-    const benchWorldBox = new THREE.Box3(
-      new THREE.Vector3(-2.1, 0, -18 - 1.4),
-      new THREE.Vector3(2.1, 1.9, -18 + 1.4)
+    // 3. Only collider is the physical workbench table itself
+    this.colliders.push(
+      new THREE.Box3(
+        new THREE.Vector3(fx - 1.8, 0, fz - 1.1),
+        new THREE.Vector3(fx + 1.8, 1.4, fz + 1.1)
+      )
     );
-    this.colliders.push(benchWorldBox);
+
+    // 4. Companion Robot VOLT-7 ("Szikra") stationed near the Awakening Pad (x: 3.2, z: 8.5)
+    const volt7 = ProceduralMeshFactory.createCompanionVolt7(new THREE.Vector3(3.2, 0, 8.5));
+    this.rootGroup.add(volt7.group);
+    this.companionVolt7 = volt7;
+
+    // 5. Side Quest & Homework Field Terminal near the Research Outpost (x: -4.2, z: -14.5)
+    const sqTerminal = ProceduralMeshFactory.createSideQuestFieldTerminal(
+      new THREE.Vector3(-4.2, 0, -14.5),
+      0.35
+    );
+    this.rootGroup.add(sqTerminal);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-5.0, 0, -15.1), new THREE.Vector3(-3.4, 1.8, -13.9))
+    );
   }
 
   private buildQuestBeacons(spec: LevelEnvironmentSpec) {
-    spec.questNodes.forEach((node) => {
+    // Use the rich 3-category interactables on Level 1, or fallback to spec.questNodes on higher levels
+    const interactables =
+      spec.levelNumber === 1
+        ? LEVEL_1_WORLD_INTERACTABLES
+        : spec.questNodes.map((n) => ({
+            id: n.id,
+            category: 'main_quest' as InteractionCategory,
+            promptKey: '[E] FŐKÜLDETÉS: KÍSÉRLET',
+            title: n.title,
+            subtitle: spec.subtitle,
+            position: n.position,
+            radius: n.radius,
+            color: n.color,
+            linkedMainQuestId: n.questId,
+            linkedSideQuestId: undefined,
+          }));
+
+    interactables.forEach((node) => {
       const beaconGroup = new THREE.Group();
       beaconGroup.position.set(node.position[0], node.position[1], node.position[2]);
 
-      // Vertical Light Beam
-      const beamGeo = new THREE.CylinderGeometry(0.3, 0.8, 6.0, 16);
+      const isMain = node.category === 'main_quest';
+      const isSide = node.category === 'side_quest';
+
+      const beamGeo = new THREE.CylinderGeometry(
+        isMain ? 0.3 : 0.14,
+        isMain ? 0.85 : 0.38,
+        isMain ? 6.5 : 3.2,
+        16
+      );
       const beamMat = new THREE.MeshStandardMaterial({
         color: node.color,
         emissive: node.color,
-        emissiveIntensity: 2.5,
+        emissiveIntensity: isMain ? 2.5 : 1.8,
         transparent: true,
-        opacity: 0.45,
+        opacity: isMain ? 0.34 : 0.18,
         blending: THREE.AdditiveBlending,
+        depthWrite: false,
       });
       const beam = new THREE.Mesh(beamGeo, beamMat);
-      beam.position.y = 1.0;
+      beam.position.y = isMain ? 1.0 : 0.4;
       beaconGroup.add(beam);
 
-      // Rotating Octahedron Icon
       const iconMat = new THREE.MeshStandardMaterial({
         color: node.color,
         emissive: node.color,
-        emissiveIntensity: 4.0,
+        emissiveIntensity: 3.6,
         roughness: 0.1,
       });
-      const iconGeo = new THREE.OctahedronGeometry(0.45, 0);
+      const iconGeo = isMain
+        ? new THREE.OctahedronGeometry(0.46, 0)
+        : isSide
+        ? new THREE.BoxGeometry(0.36, 0.36, 0.36)
+        : new THREE.OctahedronGeometry(0.26, 0);
       const iconMesh = new THREE.Mesh(iconGeo, iconMat);
       beaconGroup.add(iconMesh);
 
-      // Rotating Ring
-      const ringGeo = new THREE.TorusGeometry(0.65, 0.04, 8, 24);
+      const ringGeo = new THREE.TorusGeometry(isMain ? 0.68 : 0.42, 0.035, 8, 24);
       const ringMesh = new THREE.Mesh(ringGeo, iconMat);
       ringMesh.rotation.x = Math.PI / 2;
       beaconGroup.add(ringMesh);
-
-      const pointLight = new THREE.PointLight(node.color, 2.4, 8);
-      beaconGroup.add(pointLight);
 
       this.rootGroup.add(beaconGroup);
 
       this.questBeacons.push({
         id: node.id,
+        category: node.category,
+        promptKey: node.promptKey,
+        subtitle: node.subtitle,
         group: beaconGroup,
         position: new THREE.Vector3(...node.position),
         radius: node.radius,
-        questId: node.questId,
+        questId: node.linkedMainQuestId || node.linkedSideQuestId || node.id,
         title: node.title,
         lightBeam: beam,
         iconMesh,
@@ -766,68 +1177,211 @@ export class WorldGenerator {
     });
   }
 
-  private buildAtmosphere(spec: LevelEnvironmentSpec) {
+  /**
+   * 10. ATMOSPHERIC DEPTH, BILLOWING FACTORY SMOKE PLUMES & VOLUMETRIC SUNBEAMS
+   */
+  private buildSmokeAndAtmosphere() {
+    // 1. Slanting Volumetric Golden-Hour Sunbeams (God-Rays) cutting across the industrial valley
+    const sunbeamsGroup = new THREE.Group();
+    const sunbeamCoords: [number, number, number, number, number, number][] = [
+      // [x, y, z, height, topR, botR]
+      [0, 12.0, -16, 12.0, 0.8, 4.6],
+      [-14, 15.0, -2, 15.0, 1.5, 6.5],
+      [15, 15.0, -5, 15.0, 1.5, 6.5],
+      [-6, 16.0, 10, 16.0, 1.8, 7.2],
+    ];
+    sunbeamCoords.forEach(([sx, sy, sz, h, topR, botR]) => {
+      const ray = ProceduralMeshFactory.createVolumetricLightShaft(
+        new THREE.Vector3(sx, sy, sz),
+        h,
+        topR,
+        botR,
+        0xffe4b5,
+        0.075
+      );
+      ray.rotation.z = -0.18;
+      sunbeamsGroup.add(ray);
+    });
+    this.rootGroup.add(sunbeamsGroup);
+    this.sunbeamsGroup = sunbeamsGroup;
+
+    // 2. Billowing 3D Factory Smokestack & Cooling Tower Plumes rising into the sky!
+    const smokestackLocations: [number, number, number, number, number, number][] = [
+      // [baseX, baseY, baseZ, maxHeight, spread, colorHex]
+      [-37.5, 23.5, -10.5, 22, 6.5, 0x3a322c], // West Foundry Smokestack 1
+      [-37.5, 23.5, -1.5, 22, 6.5, 0x3a322c],  // West Foundry Smokestack 2
+      [33.5, 15.5, 2.5, 18, 7.5, 0xc2b2a3],    // East Substation Cooling Tower Steam Plume
+      [21.0, 23.5, -38.0, 22, 6.5, 0x3a322c],  // North-East Foundry Smokestack
+      [-20.0, 32.5, -40.0, 24, 8.0, 0x4a3b30], // Central Citadel West Blast Furnace
+      [20.0, 32.5, -40.0, 24, 8.0, 0x4a3b30],  // Central Citadel East Blast Furnace
+    ];
+
+    smokestackLocations.forEach(([bx, by, bz, maxH, spread, hexColor]) => {
+      const count = 42;
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const t = i / count;
+        const h = t * maxH;
+        const r = t * spread;
+        const a = i * 2.4;
+        pos[i * 3] = bx + Math.cos(a) * r * 0.5 + t * 4.5; // Wind drift east
+        pos[i * 3 + 1] = by + h;
+        pos[i * 3 + 2] = bz + Math.sin(a) * r * 0.5;
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const mat = new THREE.PointsMaterial({
+        color: hexColor,
+        size: 3.4,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+      });
+      const pts = new THREE.Points(geo, mat);
+      this.rootGroup.add(pts);
+
+      this.smokePlumes.push({
+        points: pts,
+        baseX: bx,
+        baseY: by,
+        baseZ: bz,
+        riseSpeed: 2.2 + Math.random() * 0.8,
+        maxHeight: maxH,
+        spread,
+      });
+    });
+
+    // 3. Subtle Floating Industrial Motes & Warm Furnace Embers
     const particleCount = 260;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
 
     for (let i = 0; i < particleCount * 3; i += 3) {
-      positions[i] = (Math.random() - 0.5) * 60;
-      positions[i + 1] = Math.random() * 16;
-      positions[i + 2] = (Math.random() - 0.5) * 60;
+      positions[i] = (Math.random() - 0.5) * 80;
+      positions[i + 1] = 0.4 + Math.random() * 16;
+      positions[i + 2] = (Math.random() - 0.5) * 80;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const material = new THREE.PointsMaterial({
-      color: spec.sky.secondaryLightColor,
+      color: 0xfbbf24,
       size: 0.16,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
     });
 
     this.sparkParticles = new THREE.Points(geometry, material);
     this.rootGroup.add(this.sparkParticles);
 
-    // Amber furnace embers
-    const steamCount = 120;
+    // 4. Low Ground Steam Wisps around Steam Engines & Boilers
+    const steamCount = 200;
     const steamGeo = new THREE.BufferGeometry();
     const steamPos = new Float32Array(steamCount * 3);
     for (let i = 0; i < steamCount * 3; i += 3) {
-      steamPos[i] = -8 + (Math.random() - 0.5) * 20;
-      steamPos[i + 1] = 0.5 + Math.random() * 8;
-      steamPos[i + 2] = 6 + (Math.random() - 0.5) * 20;
+      steamPos[i] = (Math.random() - 0.5) * 52;
+      steamPos[i + 1] = 0.8 + Math.random() * 9;
+      steamPos[i + 2] = (Math.random() - 0.5) * 52;
     }
     steamGeo.setAttribute('position', new THREE.BufferAttribute(steamPos, 3));
     const steamMat = new THREE.PointsMaterial({
-      color: 0xffb52e,
-      size: 0.22,
+      color: 0xe5d5c5,
+      size: 0.32,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.32,
       blending: THREE.AdditiveBlending,
     });
     this.steamParticles = new THREE.Points(steamGeo, steamMat);
     this.rootGroup.add(this.steamParticles);
 
-    this.sparkLight = new THREE.PointLight(spec.facility.signColor, 0, 14);
-    this.sparkLight.position.set(-6, 2.5, 8);
-    this.rootGroup.add(this.sparkLight);
+    // 5. Localized Pressurized Pipe Steam Vents & Intermittent Electrical Sparks
+    this.localizedSteamAndSparks = new LocalizedSteamAndSparks();
+    this.rootGroup.add(this.localizedSteamAndSparks.group);
   }
 
-  public update(delta: number, playerPos: THREE.Vector3) {
-    // 1. Rotate gears
-    this.rotatingGears.forEach((g, idx) => {
-      g.rotation.y += delta * (idx % 2 === 0 ? 0.3 : -0.25);
+  public update(delta: number, _playerPos: THREE.Vector3) {
+    const now = performance.now();
+    const time = now * 0.002;
+
+    // 1. Rotate Integrated Mechanical Drive Wheels
+    this.rotatingGears.forEach((item) => {
+      if (item.axis === 'z') {
+        item.gear.rotation.z += delta * item.speed;
+      } else if (item.axis === 'y') {
+        item.gear.rotation.y += delta * item.speed;
+      } else {
+        item.gear.rotation.x += delta * item.speed;
+      }
     });
 
-    // 2. Rotate Holographic atom
-    if (this.holoAtom) {
-      this.holoAtom.rotation.y += delta * 0.9;
-      this.holoAtom.rotation.x = Math.sin(performance.now() * 0.001) * 0.2;
+    // 2. Animate Working Steampunk Reciprocating Steam Engines
+    this.steamEngines.forEach((eng) => {
+      const phase = now * 0.001 * eng.speed + eng.phaseOffset;
+      eng.flywheel.rotation.z -= delta * eng.speed * 1.6;
+      eng.driveGear.rotation.z += delta * eng.speed * 2.4;
+      eng.governor.rotation.y += delta * eng.speed * 3.5;
+      eng.pistonRod.position.x = Math.sin(phase * 1.6) * 0.36;
+    });
+
+    // 3. Slowly Slew / Sway Hammerhead Cranes in the Skyline
+    this.animatedCranes.forEach((c) => {
+      c.crane.rotation.y = c.baseRotY + Math.sin(time * 0.18 + c.phase) * 0.14;
+    });
+
+    // 4. Animate Billowing Factory Smokestack & Cooling Tower Plumes
+    this.smokePlumes.forEach((plume, pIdx) => {
+      const posAttr = plume.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < posAttr.count; i++) {
+        let y = posAttr.getY(i) + delta * plume.riseSpeed;
+        const relH = y - plume.baseY;
+        if (relH > plume.maxHeight) {
+          y = plume.baseY;
+        }
+        const t = (y - plume.baseY) / plume.maxHeight;
+        const angle = i * 2.4 + time * 0.3 + pIdx;
+        const r = t * plume.spread * 0.55;
+        const x = plume.baseX + Math.cos(angle) * r + t * 5.0; // Wind drift
+        const z = plume.baseZ + Math.sin(angle) * r;
+        posAttr.setXYZ(i, x, y, z);
+      }
+      posAttr.needsUpdate = true;
+    });
+
+    // 5. Slowly Drift Overhead 3D Cloud Layer
+    if (this.cloudLayerGroup) {
+      this.cloudLayerGroup.rotation.y += delta * 0.006;
     }
 
-    // 3. Animate 3D Quest Beacons
-    const time = performance.now() * 0.002;
+    // 6. Animate Jagged 3D Tesla Coil Lightning Bolts
+    if (now - this.lastLightningUpdate > 55) {
+      this.lastLightningUpdate = now;
+      this.lightningArcs.forEach((arc) => {
+        const posAttr = arc.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 1; i < arc.segments; i++) {
+          const t = i / arc.segments;
+          this.tempVec.lerpVectors(arc.start, arc.end, t);
+          const envelope = Math.sin(t * Math.PI);
+          const jx = (Math.random() - 0.5) * arc.swayAmplitude * envelope;
+          const jy =
+            envelope * 0.35 + (Math.random() - 0.5) * arc.swayAmplitude * envelope;
+          const jz = (Math.random() - 0.5) * arc.swayAmplitude * envelope;
+          posAttr.setXYZ(i, this.tempVec.x + jx, this.tempVec.y + jy, this.tempVec.z + jz);
+        }
+        posAttr.needsUpdate = true;
+
+        if (arc.light) {
+          arc.light.intensity = 2.0 + Math.random() * 2.5;
+        }
+      });
+    }
+
+    // 7. Rotate Holographic Atom
+    if (this.holoAtom) {
+      this.holoAtom.rotation.y += delta * 0.9;
+      this.holoAtom.rotation.x = Math.sin(now * 0.001) * 0.2;
+    }
+
+    // 8. Animate 3D Quest Beacons
     this.questBeacons.forEach((beacon, idx) => {
       const bob = Math.sin(time + idx) * 0.18;
       beacon.iconMesh.position.y = bob;
@@ -838,9 +1392,9 @@ export class WorldGenerator {
       beacon.lightBeam.scale.set(beamScale, 1, beamScale);
     });
 
-    // 4. Pulsate Tower Energy Rings & Elevator Beam
+    // 9. Pulsate Tower Energy Rings & Elevator Beam
     if (this.centralElevatorBeam) {
-      const scale = 1.0 + Math.sin(performance.now() * 0.003) * 0.08;
+      const scale = 1.0 + Math.sin(now * 0.003) * 0.08;
       this.centralElevatorBeam.scale.set(scale, 1, scale);
     }
 
@@ -848,63 +1402,77 @@ export class WorldGenerator {
       ring.rotation.z += delta * (idx % 2 === 0 ? 0.2 : -0.15);
     });
 
-    // 5. Automated Blast Door Logic
-    const [fx, , fz] = this.currentSpec.facility.position;
-    const doorPos = new THREE.Vector3(fx, 0, fz + this.currentSpec.facility.depth / 2);
-    const distToDoor = playerPos.distanceTo(doorPos);
-    const doorTriggerDistance = 5.2;
-
-    if (distToDoor < doorTriggerDistance) {
-      if (this.doorProgress < 1.0) {
-        if (!this.doorPlayedSfx && this.doorProgress < 0.1) {
-          soundManager.playDoorSwoosh();
-          this.doorPlayedSfx = true;
-        }
-        this.doorProgress = Math.min(1.0, this.doorProgress + delta * 2.2);
-      }
-    } else {
-      if (this.doorProgress > 0) {
-        this.doorProgress = Math.max(0, this.doorProgress - delta * 1.8);
-        if (this.doorProgress === 0) {
-          this.doorPlayedSfx = false;
-        }
-      }
-    }
-
-    if (this.labDoorLeft && this.labDoorRight) {
-      const openOffset = this.doorProgress * 1.9;
-      const defaultLeftX = -1.1;
-      const defaultRightX = 1.1;
-      this.labDoorLeft.position.x = defaultLeftX - openOffset;
-      this.labDoorRight.position.x = defaultRightX + openOffset;
-    }
-
-    // 6. Spark flicker & steam drift
-    if (this.sparkLight) {
-      if (Math.random() < 0.04) {
-        this.sparkLight.intensity = 3.2;
-      } else {
-        this.sparkLight.intensity *= 0.8;
-      }
-    }
-
+    // 10. Drift Atmospheric Particles & Distant Horizon Shimmer
     if (this.sparkParticles) {
-      this.sparkParticles.rotation.y += delta * 0.025;
+      this.sparkParticles.rotation.y += delta * 0.015;
     }
 
     if (this.steamParticles) {
-      this.steamParticles.rotation.y += delta * 0.015;
+      this.steamParticles.rotation.y -= delta * 0.012;
     }
+
+    if (this.skyCityLights) {
+      this.skyCityLights.rotation.y += delta * 0.003;
+    }
+
+    // 11. Animate Cruising Steampunk Airships / Dirigibles
+    this.airships.forEach((ship, idx) => {
+      ship.angle += delta * ship.speed;
+      const sx = Math.cos(ship.angle) * ship.radius;
+      const sz = Math.sin(ship.angle) * ship.radius - 8;
+      const sy = ship.altitude + Math.sin(time * 0.8 + idx * 1.7) * 1.2;
+
+      ship.group.position.set(sx, sy, sz);
+      const tangentAngle = ship.speed > 0 ? -ship.angle : -ship.angle + Math.PI;
+      ship.group.rotation.y = tangentAngle;
+      ship.group.rotation.z = Math.sin(time + idx) * 0.05;
+
+      ship.propeller.rotation.z += delta * 14;
+    });
+
+    // 12. Animate Companion Robot VOLT-7 ("Szikra") hovering & turning toward player
+    if (this.companionVolt7) {
+      this.companionVolt7.bodyGroup.position.y = 1.25 + Math.sin(time * 1.4) * 0.12;
+      this.companionVolt7.gyroRing.rotation.z += delta * 1.8;
+      this.companionVolt7.gyroRing.rotation.x = Math.PI / 2.3 + Math.sin(time) * 0.22;
+
+      const dx = _playerPos.x - 3.2;
+      const dz = _playerPos.z - 8.5;
+      const targetAngle = Math.atan2(dx, dz);
+      this.companionVolt7.bodyGroup.rotation.y = THREE.MathUtils.lerp(
+        this.companionVolt7.bodyGroup.rotation.y,
+        targetAngle,
+        delta * 5
+      );
+    }
+
+    // 13. Update Localized Pipe Steam Jets & Intermittent Electrical Spark Bursts
+    if (this.localizedSteamAndSparks) {
+      this.localizedSteamAndSparks.update(delta);
+    }
+  }
+
+  public setEffectsVisibility(particlesEnabled: boolean, atmosphericEffectsEnabled: boolean) {
+    if (this.sparkParticles) this.sparkParticles.visible = particlesEnabled;
+    if (this.steamParticles) this.steamParticles.visible = particlesEnabled;
+    if (this.localizedSteamAndSparks) this.localizedSteamAndSparks.group.visible = particlesEnabled;
+    this.smokePlumes.forEach((p) => {
+      p.points.visible = particlesEnabled;
+    });
+    if (this.sunbeamsGroup) this.sunbeamsGroup.visible = atmosphericEffectsEnabled;
+    if (this.cloudLayerGroup) this.cloudLayerGroup.visible = atmosphericEffectsEnabled;
   }
 
   public checkPlayerLocation(playerPos: THREE.Vector3): string {
     const [, , fz] = this.currentSpec.facility.position;
-    if (playerPos.z < fz + 10 && Math.abs(playerPos.x) < 7.5 && playerPos.z > fz - 9) {
+    if (playerPos.distanceTo(new THREE.Vector3(0, 0, fz)) < 7.0) {
       return `Level ${this.currentSpec.levelNumber}: ${this.currentSpec.facility.name}`;
-    } else if (playerPos.z > 6) {
-      return `Level ${this.currentSpec.levelNumber}: ${this.currentSpec.name} (${this.currentSpec.subtitle})`;
+    } else if (playerPos.distanceTo(new THREE.Vector3(12, 0, -4)) < 7.5) {
+      return `Level ${this.currentSpec.levelNumber}: Keleti Alállomás & Tesla-Mező`;
+    } else if (playerPos.distanceTo(new THREE.Vector3(-11, 0, 5)) < 7.5) {
+      return `Level ${this.currentSpec.levelNumber}: Nyugati Öntöde & Gőzgép-Udvar`;
     } else {
-      return `Level ${this.currentSpec.levelNumber}: Central Walkway & Tower Ascent`;
+      return `Level ${this.currentSpec.levelNumber}: Ipari Völgy & Roncstelep`;
     }
   }
 }

@@ -8,7 +8,7 @@
  * - Configurable via UI settings or VITE_ environment variables.
  */
 
-import { QuestCompletion, UserProfile, BackendSyncState } from '../types/game';
+import { QuestCompletion, UserProfile, BackendSyncState, HomeworkSubmissionRecord } from '../types/game';
 
 const STORAGE_KEYS = {
   SUPABASE_URL: 'stempunk_supabase_url',
@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   USER_SESSION: 'stempunk_user_session',
   COMPLETIONS: 'stempunk_quest_completions',
   PENDING_SYNC: 'stempunk_pending_sync_queue',
+  HOMEWORK_SUBMISSIONS: 'stempunk_homework_submissions',
 };
 
 // Default fallback student profile for instant playable vertical slice
@@ -303,6 +304,77 @@ class PointTrackerService {
     this.syncState.pendingCompletionsCount = this.getPendingQueue().length;
     this.notify();
   }
+
+  /**
+   * Homework & Side Quest Verification Pipeline
+   * Homework is NEVER marked as academically verified merely because a student clicked submit.
+   * Requires teacher review ('approved') before awarding authoritative school points.
+   */
+  public getHomeworkSubmissions(): HomeworkSubmissionRecord[] {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  public submitHomeworkForVerification(
+    sideQuestId: string,
+    submissionText: string,
+    schoolPointsPotential: number,
+    requiresTeacherVerification: boolean
+  ): HomeworkSubmissionRecord {
+    const user = this.getCurrentUser();
+    const list = this.getHomeworkSubmissions();
+    const existingIdx = list.findIndex((h) => h.sideQuestId === sideQuestId && h.userId === user.id);
+
+    const record: HomeworkSubmissionRecord = {
+      id: existingIdx >= 0 ? list[existingIdx].id : `hw-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      userId: user.id,
+      sideQuestId,
+      submissionText: submissionText.trim(),
+      status: requiresTeacherVerification ? 'pending_verification' : 'approved',
+      schoolPointsPending: requiresTeacherVerification ? schoolPointsPotential : 0,
+      schoolPointsAwarded: requiresTeacherVerification ? 0 : schoolPointsPotential,
+      submittedAt: new Date().toISOString(),
+    };
+
+    if (existingIdx >= 0) {
+      list[existingIdx] = record;
+    } else {
+      list.push(record);
+    }
+    localStorage.setItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS, JSON.stringify(list));
+    return record;
+  }
+
+  public reviewHomeworkSubmission(
+    sideQuestId: string,
+    decision: 'approved' | 'rejected',
+    teacherFeedback: string
+  ): HomeworkSubmissionRecord | null {
+    const user = this.getCurrentUser();
+    const list = this.getHomeworkSubmissions();
+    const idx = list.findIndex((h) => h.sideQuestId === sideQuestId && h.userId === user.id);
+    if (idx < 0) return null;
+
+    const record = list[idx];
+    record.status = decision;
+    record.reviewedAt = new Date().toISOString();
+    record.teacherFeedback = teacherFeedback;
+    if (decision === 'approved') {
+      record.schoolPointsAwarded = record.schoolPointsPending;
+      record.schoolPointsPending = 0;
+    } else {
+      record.schoolPointsAwarded = 0;
+    }
+
+    list[idx] = record;
+    localStorage.setItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS, JSON.stringify(list));
+    return record;
+  }
 }
 
 export const pointTrackerService = new PointTrackerService();
+

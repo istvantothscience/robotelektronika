@@ -2,8 +2,11 @@ import * as THREE from 'three';
 import { PlayerController, PlayerInput } from './PlayerController';
 import { WorldGenerator } from './generators/WorldGenerator';
 import { LEVEL_SPECIFICATIONS, LevelEnvironmentSpec } from './generators/LevelEnvironmentSpec';
+import { PBRTextureGenerator } from './materials/PBRTextureGenerator';
 import { useGameStore } from '../../store/useGameStore';
 import { soundManager } from '../../audio/soundManager';
+import { GRAPHICS_PRESETS, GraphicsQuality } from '../../config/graphicsConfig';
+import { PostProcessingPipeline } from './postprocessing/PostProcessingPipeline';
 
 export class SceneManager {
   private container: HTMLElement;
@@ -16,13 +19,13 @@ export class SceneManager {
   // Components
   public player: PlayerController;
   public world: WorldGenerator;
+  private postProcessing: PostProcessingPipeline;
 
   // Lights for dynamic level spec adjustment
   private hemiLight!: THREE.HemisphereLight;
   private ambientLight!: THREE.AmbientLight;
   private sunLight!: THREE.DirectionalLight;
   private bounceLight!: THREE.DirectionalLight;
-  private rimLight!: THREE.DirectionalLight;
   private unsubscribeStore: (() => void) | null = null;
 
   // Input & Camera Controls
@@ -50,29 +53,45 @@ export class SceneManager {
   constructor(container: HTMLElement) {
     this.container = container;
 
-    // 1. Scene & Atmospheric Fog
+    // 1. Scene & Warm Steampunk Amber-Brown Atmospheric Fog
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x161f2c);
-    this.scene.fog = new THREE.FogExp2(0x161f2c, 0.012);
+    this.scene.background = new THREE.Color(0x38220f);
+    this.scene.fog = new THREE.FogExp2(0x3d2510, 0.007);
 
     // 2. Camera setup
     const aspect = container.clientWidth / container.clientHeight;
-    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 200);
-    this.camera.position.set(0, 5, 15);
+    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 240);
+    this.camera.position.set(0, 5, 16);
 
     // 3. Renderer setup
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.3;
+    this.renderer.toneMappingExposure = 1.18;
+
+    // AAA Image-Based Lighting (IBL): Panoramic environment map for metallic reflections
+    try {
+      this.scene.environment = PBRTextureGenerator.createEnvironmentMap(this.renderer);
+    } catch (e) {
+      console.warn('Could not generate environment map:', e);
+    }
 
     container.appendChild(this.renderer.domElement);
 
     // 4. Lighting Setup
     this.setupLighting();
+
+    // 4B. Post-Processing Pipeline (Restrained Bloom + ACES OutputPass)
+    this.postProcessing = new PostProcessingPipeline(
+      this.renderer,
+      this.scene,
+      this.camera,
+      container.clientWidth,
+      container.clientHeight
+    );
 
     // 5. Instantiate Procedural Parametric World & Player
     const initialLvl = useGameStore.getState().activeTowerLevel || 1;
@@ -82,14 +101,29 @@ export class SceneManager {
     // Apply lighting from the level specification
     this.applyLevelLighting(this.world.currentSpec);
 
-    // Player starts at Scrapyard Awakening Pod (z = 11)
+    // Player starts at Open Steampunk Clockwork Awakening Platform (z = 11)
     this.player = new PlayerController(new THREE.Vector3(0, 0, 11));
     this.scene.add(this.player.group);
 
-    // Subscribe to store level changes to dynamically regenerate the world
+    // Sync initial 3D character upgrades and graphics quality preset
+    const initStore = useGameStore.getState();
+    this.player.syncUpgrades(
+      initStore.upgrades.filter((u) => u.unlocked && u.equipped).map((u) => u.id)
+    );
+    this.applyGraphicsQuality(initStore.quality);
+
+    // Subscribe to store changes for level switches, character upgrades, and graphics quality
     this.unsubscribeStore = useGameStore.subscribe((state, prevState) => {
       if (state.activeTowerLevel !== prevState.activeTowerLevel) {
         this.switchLevel(state.activeTowerLevel);
+      }
+      if (state.upgrades !== prevState.upgrades) {
+        this.player.syncUpgrades(
+          state.upgrades.filter((u) => u.unlocked && u.equipped).map((u) => u.id)
+        );
+      }
+      if (state.quality !== prevState.quality) {
+        this.applyGraphicsQuality(state.quality);
       }
     });
 
@@ -100,34 +134,44 @@ export class SceneManager {
     this.start();
   }
 
+  public applyGraphicsQuality(quality: GraphicsQuality) {
+    const cfg = GRAPHICS_PRESETS[quality] || GRAPHICS_PRESETS.high;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cfg.maxPixelRatio));
+    this.renderer.shadowMap.enabled = cfg.shadowsEnabled;
+    if (this.sunLight) {
+      this.sunLight.castShadow = cfg.shadowsEnabled;
+    }
+    if (this.postProcessing) {
+      this.postProcessing.enabled = cfg.postProcessingEnabled;
+    }
+    this.world.setEffectsVisibility(cfg.particlesEnabled, cfg.atmosphericEffectsEnabled);
+  }
+
   private setupLighting() {
-    this.hemiLight = new THREE.HemisphereLight(0x7dd3fc, 0x78350f, 1.4);
+    // Cool-slate sky dome fill vs grounded warm earth bounce for true 3D form separation
+    this.hemiLight = new THREE.HemisphereLight(0x8899aa, 0x2d241c, 1.15);
     this.scene.add(this.hemiLight);
 
-    this.ambientLight = new THREE.AmbientLight(0x334155, 1.6);
+    this.ambientLight = new THREE.AmbientLight(0x6e7885, 1.45);
     this.scene.add(this.ambientLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffedd5, 2.4);
-    this.sunLight.position.set(22, 40, 18);
+    this.sunLight = new THREE.DirectionalLight(0xffe4b5, 2.8);
+    this.sunLight.position.set(38, 46, 26);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 2048;
-    this.sunLight.shadow.mapSize.height = 2048;
-    this.sunLight.shadow.camera.near = 0.5;
-    this.sunLight.shadow.camera.far = 100;
-    this.sunLight.shadow.camera.left = -35;
-    this.sunLight.shadow.camera.right = 35;
-    this.sunLight.shadow.camera.top = 35;
-    this.sunLight.shadow.camera.bottom = -35;
-    this.sunLight.shadow.bias = -0.0003;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
+    this.sunLight.shadow.camera.near = 2;
+    this.sunLight.shadow.camera.far = 120;
+    this.sunLight.shadow.camera.left = -44;
+    this.sunLight.shadow.camera.right = 44;
+    this.sunLight.shadow.camera.top = 44;
+    this.sunLight.shadow.camera.bottom = -44;
+    this.sunLight.shadow.bias = -0.0005;
     this.scene.add(this.sunLight);
 
-    this.bounceLight = new THREE.DirectionalLight(0xf97316, 1.4);
-    this.bounceLight.position.set(-15, 10, 20);
+    this.bounceLight = new THREE.DirectionalLight(0xc27838, 1.25);
+    this.bounceLight.position.set(-24, 18, 22);
     this.scene.add(this.bounceLight);
-
-    this.rimLight = new THREE.DirectionalLight(0x0284c7, 1.2);
-    this.rimLight.position.set(-25, 25, -25);
-    this.scene.add(this.rimLight);
   }
 
   public switchLevel(levelNum: number) {
@@ -152,6 +196,7 @@ export class SceneManager {
     this.ambientLight.intensity = spec.sky.ambientIntensity;
     this.sunLight.color.setHex(spec.sky.sunColor);
     this.sunLight.intensity = spec.sky.sunIntensity;
+    this.sunLight.position.set(...spec.sky.sunPosition);
     this.bounceLight.color.setHex(spec.sky.secondaryLightColor);
     this.bounceLight.intensity = spec.sky.secondaryLightIntensity;
   }
@@ -326,6 +371,9 @@ export class SceneManager {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    if (this.postProcessing) {
+      this.postProcessing.setSize(width, height);
+    }
   };
 
   public start() {
@@ -384,8 +432,12 @@ export class SceneManager {
       useGameStore.getState().setPlayerCoordinates(pPos.x, pPos.z, this.player.getHeadingAngle());
     }
 
-    // 6. Render Scene
-    this.renderer.render(this.scene, this.camera);
+    // 6. Render Scene (with restrained post-processing bloom when enabled by Graphics Quality preset)
+    if (this.postProcessing && this.postProcessing.enabled) {
+      this.postProcessing.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   };
 
   private checkTriggersAndLocation(pPos: THREE.Vector3) {
@@ -396,7 +448,7 @@ export class SceneManager {
       useGameStore.getState().setCurrentLocation(currentLoc);
     }
 
-    // B. Check 3D Quest Beacons Proximity (Walking into beacon zones)
+    // B. Check 3D World Interactables Proximity (Main Quests, Side Quests, Companion & Ambient Inspections)
     let foundBeaconTarget = false;
     for (const beacon of this.world.questBeacons) {
       const dist = pPos.distanceTo(beacon.position);
@@ -405,19 +457,26 @@ export class SceneManager {
         if (this.lastInteractionTargetId !== beacon.id) {
           this.lastInteractionTargetId = beacon.id;
           useGameStore.getState().setInteractionTarget({
-            type: 'terminal',
+            id: beacon.id,
+            category: beacon.category,
+            promptKey: beacon.promptKey,
+            type: beacon.category === 'ambient' ? 'npc' : 'terminal',
             title: beacon.title,
-            hint: 'Beléptél a küldetés zónájába! Nyomj [E]-t vagy kattints a megnyitáshoz!',
+            subtitle: beacon.subtitle,
+            hint: `${beacon.promptKey} — ${beacon.subtitle}`,
             action: () => {
-              if (beacon.id === 'beacon-static-lab') {
-                useGameStore.getState().openModal('experiment');
-              } else if (beacon.id === 'beacon-robot-core') {
-                useGameStore.getState().addToast({
-                  type: 'info',
-                  title: 'Dormant Robot Core',
-                  message: 'A roncs mellkasi akkumulátora dörzsölésből származó elektrosztatikus maradék töltést hordoz!',
-                });
-                useGameStore.getState().unlockDiscovery('static-charge');
+              const store = useGameStore.getState();
+              if (beacon.category === 'main_quest') {
+                if (beacon.id === 'beacon-robot-core' || beacon.id === 'beacon-tesla-array') {
+                  soundManager.playElectricSpark();
+                }
+                store.openExperimentForQuest(beacon.questId);
+              } else if (beacon.category === 'side_quest') {
+                store.openWorldInteraction(beacon.id);
+              } else {
+                // Ambient world interaction or Companion VOLT-7 dialogue
+                store.inspectAmbientObject(beacon.id);
+                store.openWorldInteraction(beacon.id);
               }
             },
           });
