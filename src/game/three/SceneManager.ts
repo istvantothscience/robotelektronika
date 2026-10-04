@@ -50,6 +50,15 @@ export class SceneManager {
   private lastInteractionTargetId: string | null = null;
   private lastCoordUpdateTime: number = 0;
 
+  // Real-time Kinematics Telemetry (Mission 01-03)
+  private totalDistanceTraveled: number = 0;
+  private totalMovementTime: number = 0;
+  private prevPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 11);
+  private prevSpeed: number = 0;
+  private crateBypassed: boolean = false;
+  private sensorReached: boolean = false;
+  private hasMovedOnce: boolean = false;
+
   constructor(container: HTMLElement) {
     this.container = container;
 
@@ -235,8 +244,9 @@ export class SceneManager {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
-    // If an interactive modal is active, do not consume WASD
-    const { activeModal } = useGameStore.getState();
+    // If an interactive modal or cinematic intro is active, do not consume WASD
+    const { activeModal, showCinematicIntro } = useGameStore.getState();
+    if (showCinematicIntro) return;
     if (activeModal !== null) {
       if (e.key === 'Escape') {
         useGameStore.getState().closeModal();
@@ -402,6 +412,66 @@ export class SceneManager {
     // 1. Update Player with collisions
     this.player.update(delta, this.input, this.cameraYaw, this.world.colliders);
 
+    // 1B. Compute Live Kinematics Telemetry (s, Δr, t, v, a) & RO-01 Contextual Reactions
+    const stepDist = Math.hypot(pPos.x - this.prevPosition.x, pPos.z - this.prevPosition.z);
+    const instSpeed = delta > 0.001 ? stepDist / delta : 0;
+    const instAccel = delta > 0.001 ? (instSpeed - this.prevSpeed) / delta : 0;
+
+    if (stepDist > 0.003) {
+      this.totalDistanceTraveled += stepDist;
+      this.totalMovementTime += delta;
+      if (!this.hasMovedOnce && this.totalDistanceTraveled > 0.4) {
+        this.hasMovedOnce = true;
+        useGameStore.getState().triggerSpeechBubble({
+          id: 'ro01-first-step',
+          speaker: 'RO-01',
+          title: 'AZ ELSŐ ÖNÁLLÓ LÉPÉSEK',
+          text: '„Mozgok! A bal lábam még kicsit nyikorog, de a szenzorom máris méri a megtett utat (s) és az eltelt időt (t). Lássuk, eljutok-e a régi mozgásszenzorig!”',
+          status: 'Vonatkoztatási pont: Ébredési platform (x = 0, z = 11)',
+        });
+      }
+    }
+
+    // Check collision with the rusty crate obstacle near z = 6.8
+    if (
+      this.player.lastCollidedWithObstacle &&
+      Math.abs(pPos.x) < 2.2 &&
+      pPos.z > 4.8 &&
+      pPos.z < 9.2
+    ) {
+      soundManager.playCollisionThud();
+      useGameStore.getState().triggerSpeechBubble(
+        {
+          id: 'ro01-crate-collision',
+          speaker: 'RO-01',
+          title: 'ÜTKÖZÉS // ROZSDÁS LÁDA AKADÁLY',
+          text: '„Ácsi! Ez a rozsdás láda szilárdabb, mint amilyennek látszik. Egyenesen nem tudok átmenni rajta — meg kell kerülnöm (A vagy D billentyűvel)! Így a megtett utam (s) hosszabb lesz, mint a légvonalbeli elmozdulásom (Δr).”',
+          status: 'Fizikai megfigyelés: Kerülőút esetén s > |Δr|',
+        },
+        7000
+      );
+    }
+
+    // Check if RO-01 bypassed the crate (z < 5.5)
+    if (!this.crateBypassed && pPos.z < 5.4) {
+      this.crateBypassed = true;
+      useGameStore.getState().triggerSpeechBubble({
+        id: 'ro01-crate-bypassed',
+        speaker: 'RO-01',
+        title: 'AKADÁLY MEGKERÜLVE // IRÁNY A SZENZOR!',
+        text: '„Sikerült megkerülnöm a ládát! Nézd a telemetriát: a ténylegesen bejárt utam (s) máris nagyobb, mint az ébredési ponttól mért egyenes távolság (Δr). Most menjünk a kéken világító mozgásszenzorhoz (z = 2.5), és nyomd meg az [E] gombot!”',
+        status: 'Cél: Aktiváld a Régi Mozgásszenzort az [E] billentyűvel!',
+      });
+    }
+
+    const displacementFromStart = Math.hypot(pPos.x - 0, pPos.z - 11);
+    if (!this.sensorReached && Math.hypot(pPos.x - 0, pPos.z - 2.5) < 3.2) {
+      this.sensorReached = true;
+    }
+
+    this.prevPosition.copy(pPos);
+    this.prevSpeed = instSpeed;
+
     // 2. Update World animations (rotating gears, opening doors, hologram)
     this.world.update(delta, pPos);
 
@@ -426,10 +496,21 @@ export class SceneManager {
     // 4. Check Player Proximity to Triggers & Location
     this.checkTriggersAndLocation(pPos);
 
-    // 5. Throttled broadcast for Minimap
-    if (now - this.lastCoordUpdateTime > 50) {
+    // 5. Throttled broadcast for Minimap & Kinematics Telemetry
+    if (now - this.lastCoordUpdateTime > 65) {
       this.lastCoordUpdateTime = now;
-      useGameStore.getState().setPlayerCoordinates(pPos.x, pPos.z, this.player.getHeadingAngle());
+      const store = useGameStore.getState();
+      store.setPlayerCoordinates(pPos.x, pPos.z, this.player.getHeadingAngle());
+      store.updateKinematicsTelemetry({
+        distanceTraveled: Number(this.totalDistanceTraveled.toFixed(1)),
+        displacement: Number(displacementFromStart.toFixed(1)),
+        movementTime: Number(this.totalMovementTime.toFixed(1)),
+        currentSpeed: Number(instSpeed.toFixed(1)),
+        currentAcceleration: Number(instAccel.toFixed(1)),
+        crateBypassed: this.crateBypassed,
+        sensorReached: this.sensorReached,
+        hasMovedOnce: this.hasMovedOnce,
+      });
     }
 
     // 6. Render Scene (with restrained post-processing bloom when enabled by Graphics Quality preset)

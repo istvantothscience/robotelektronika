@@ -62,6 +62,7 @@ export class PlayerController {
   private targetRotation: number = 0;
   private turnVelocity: number = 0;
   private blinkTimer: number = 0;
+  public lastCollidedWithObstacle: boolean = false;
 
   constructor(initialPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 11)) {
     this.group = new THREE.Group();
@@ -842,6 +843,8 @@ export class PlayerController {
     }
     if (!collideZ) this.position.z = nextPos.z;
     else this.velocity.z = 0;
+
+    this.lastCollidedWithObstacle = isMoving && (collideX || collideZ);
 
     // Y floor collision
     const floorY = 0;

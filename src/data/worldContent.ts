@@ -422,13 +422,46 @@ export const INITIAL_SIDE_QUESTS: SideQuest[] = [
  * - Category C: Main Quests (core curriculum physics challenges)
  */
 export const LEVEL_1_WORLD_INTERACTABLES: WorldInteractableSpec[] = [
-  // === CATEGORY C: MAIN QUESTS ===
+  // === CATEGORY C: KINEMATICS & MAIN QUESTS ===
+  {
+    id: 'beacon-kinematics-sensor',
+    category: 'main_quest',
+    promptKey: '[E] SZENZOR AKTIVÁLÁSA (01. KÜLDETÉS)',
+    title: '01. küldetés – Régi Mozgásszenzor és Útmérő Egység',
+    subtitle: 'Kinematika 1. szakasz: Mozgás, megtett út (s), elmozdulás (Δr) és idő (t)',
+    position: [0, 1.8, 2.5],
+    radius: 3.4,
+    color: 0x38bdf8,
+    linkedMainQuestId: 'quest-k01-first-steps',
+  },
+  {
+    id: 'beacon-kinematics-speed',
+    category: 'main_quest',
+    promptKey: '[E] SEBESSÉGMÉRŐ PRÓBAPAD (02. KÜLDETÉS)',
+    title: '02. küldetés – Sebesség és Mértékegység-átváltó (v = s / t)',
+    subtitle: 'Kinematika 2. szakasz: Átlagsebesség és m/s ↔ km/h átváltás (×3,6)',
+    position: [-5.2, 1.8, -1.8],
+    radius: 3.2,
+    color: 0x22d3ee,
+    linkedMainQuestId: 'quest-k02-speed',
+  },
+  {
+    id: 'beacon-kinematics-accel',
+    category: 'main_quest',
+    promptKey: '[E] GYORSULÁSMÉRŐ SZERVÓPAD (03. KÜLDETÉS)',
+    title: '03. küldetés – Szervóteszt és Gyorsulásmérés (a = Δv / Δt)',
+    subtitle: 'Kinematika 3. szakasz: Sebességváltozás és gyorsulás megkülönböztetése',
+    position: [5.2, 1.8, -1.8],
+    radius: 3.2,
+    color: 0x34d399,
+    linkedMainQuestId: 'quest-k03-acceleration',
+  },
   {
     id: 'beacon-static-lab',
     category: 'main_quest',
     promptKey: '[E] FŐKÜLDETÉS: KÍSÉRLET',
-    title: '01. Elektrosztatika Kísérleti Asztal',
-    subtitle: '1. Tanóra: Dörzsöléses elektromosság és megosztás',
+    title: '04. Elektrosztatika Kísérleti Asztal',
+    subtitle: 'Elektrosztatika: Dörzsöléses elektromosság és megosztás',
     position: [0, 2.6, -16],
     radius: 3.8,
     color: 0xf59e0b,
@@ -438,8 +471,8 @@ export const LEVEL_1_WORLD_INTERACTABLES: WorldInteractableSpec[] = [
     id: 'beacon-robot-core',
     category: 'main_quest',
     promptKey: '[E] FŐKÜLDETÉS: COULOMB-MAG',
-    title: '02. Töltött Automatamag Vizsgálata',
-    subtitle: '2. Tanóra: Kétféle töltés, vonzás, taszítás és Coulomb-erő',
+    title: '05. Töltött Automatamag Vizsgálata',
+    subtitle: 'Elektrosztatika: Kétféle töltés, vonzás, taszítás és Coulomb-erő',
     position: [-11, 2.2, 5],
     radius: 3.6,
     color: 0xfbbf24,
@@ -449,8 +482,8 @@ export const LEVEL_1_WORLD_INTERACTABLES: WorldInteractableSpec[] = [
     id: 'beacon-tesla-array',
     category: 'main_quest',
     promptKey: '[E] FŐKÜLDETÉS: TESLA-FÖLDELÉS',
-    title: '03. Villámló Tesla-Tekercs Generátor',
-    subtitle: '3. Tanóra: Vezetők, szigetelők és nagyfeszültségű földelés',
+    title: '06. Villámló Tesla-Tekercs Generátor',
+    subtitle: 'Elektrosztatika: Vezetők, szigetelők és nagyfeszültségű földelés',
     position: [12, 2.6, -4],
     radius: 3.8,
     color: 0x38bdf8,
@@ -484,6 +517,27 @@ export const LEVEL_1_WORLD_INTERACTABLES: WorldInteractableSpec[] = [
   },
 
   // === CATEGORY A: AMBIENT WORLD INTERACTIONS ===
+  {
+    id: 'ambient-household-scrap',
+    category: 'ambient',
+    promptKey: '[E] VIZSGÁLAT: HÁZTARTÁSI GÉPEK',
+    title: 'Kidobott Háztartási Gépek (Kávéfőző & Takarítómodul)',
+    subtitle: 'RO-01 emléke a régi otthonról · Ébredési Ösvény',
+    position: [-2.6, 0.8, 9.2],
+    radius: 2.5,
+    color: 0x38bdf8,
+    linkedLoreId: 'lore-01-awakening',
+    ambientInspection: {
+      objectType: 'Selejtezett Háztartási Kávéfőző és Porszívóegység',
+      sensoryDescription:
+        'A sárgaréz kávéfőző kazánja behorpadt, mellette egy régi automata porszívókefe és egy bevásárlórekesz fekszik a sárban.',
+      scientificObservation:
+        'A háztartási gépek forgó alkatrészei egyenletes körmozgást, a takarítófej pedig szakaszos egyenes vonalú mozgást végzett.',
+      narrativeWhisper:
+        'RO-01: „Pontosan ilyen kávéfőzőt kezeltem minden reggel 06:45-kor. Furcsa: most először nem érzek késztetést arra, hogy megfőzzem a kávét.”',
+      xpBonus: 15,
+    },
+  },
   {
     id: 'ambient-broken-hand',
     category: 'ambient',

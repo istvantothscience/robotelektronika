@@ -2,6 +2,36 @@ import { Quest, Discovery } from '../types/game';
 
 export const INITIAL_DISCOVERIES: Discovery[] = [
   {
+    id: 'kinematics-path-time',
+    title: 'Mozgás, Út (s), Elmozdulás (Δr) és Idő (t)',
+    category: 'Kinematika',
+    description:
+      'Egy test mozgását mindig egy választott vonatkoztatási rendszerhez (pl. RO-01 ébredési pontjához) képest írjuk le. A megtett út (s) a pálya teljes hossza, amelyet a test bejár (például amikor megkerül egy ládát), míg az elmozdulás (Δr) a kezdő- és végpontot összekötő irányított szakasz. Egyenes vonalú, egyirányú mozgásnál a kettő nagysága megegyezik, kerülőútnál viszont s > |Δr|.',
+    formula: 's ≥ |Δr|,  mértékegységek: [s] = m (méter),  [t] = s (másodperc)',
+    keyTakeaway:
+      'A megtett út (s) a ténylegesen bejárt pályahossz, az elmozdulás (Δr) pedig a kezdő- és végpont közötti legrövidebb irányított távolság.',
+  },
+  {
+    id: 'kinematics-speed',
+    title: 'Átlagsebesség, Pillanatnyi Sebesség és Mértékegység-átváltás',
+    category: 'Kinematika',
+    description:
+      'Az átlagsebesség megmutatja, hogy a test átlagosan mekkora utat tesz meg egységnyi idő alatt: v_átlag = s / t. A pillanatnyi sebesség a test adott pillanatbeli mozgásállapotát jellemzi. Az SI-alapegység a m/s, a hétköznapi km/h-ra való átszámítás váltószáma 3,6 (1 m/s = 3,6 km/h).',
+    formula: 'v = s / t,   1 m/s = 3,6 km/h',
+    keyTakeaway:
+      'm/s-ról km/h-ra szorzunk 3,6-del; km/h-ról m/s-ra osztunk 3,6-del.',
+  },
+  {
+    id: 'kinematics-acceleration',
+    title: 'Gyorsulás és Sebességváltozás (a = Δv / Δt)',
+    category: 'Kinematika',
+    description:
+      'A gyorsulás (a) megmutatja, milyen gyorsan változik a test sebessége: azaz egységnyi idő alatt mennyivel nő vagy csökken a sebesség. Fontos különbség: egy nagy sebességgel, de állandó tempóval haladó test gyorsulása nulla (a = 0), míg az elinduló robot sebessége még kicsi, de gyorsulása pozitív!',
+    formula: 'a = Δv / Δt = (v - v₀) / Δt,   [a] = m/s²',
+    keyTakeaway:
+      'A sebesség (v) azt mutatja, milyen gyorsan haladunk, a gyorsulás (a) pedig azt, milyen ütemben változik a sebességünk.',
+  },
+  {
     id: 'static-charge',
     title: 'Elektrosztatikus vonzás & Töltések',
     category: 'Elektrosztatika',
@@ -32,9 +62,159 @@ export const INITIAL_DISCOVERIES: Discovery[] = [
 
 export const CAMPAIGN_QUESTS: Quest[] = [
   {
-    id: 'quest-01-electrostatics',
+    id: 'quest-k01-first-steps',
     lessonId: 1,
-    lessonTitle: '01. A furcsa erő: elektrosztatikus alapjelenségek',
+    lessonTitle: '01. küldetés – Az első lépések (Mozgás, út és idő)',
+    title: '01. küldetés – Az első lépések',
+    description:
+      '„Rendben. Ha már nem vagyok hajlandó itt feküdni örökké, ideje kipróbálnom a lábaimat. Csak egy apró problémám van: nem tudom, milyen messzire jutok egy lépéssel, és azt sem, mennyi idő alatt.” Kerüld meg az utadat elálló rozsdás ládát, és aktiváld a régi mozgásszenzort (z = 2.5)!',
+    objective: 'Kerüld meg a rozsdás ládát, keresd meg a régi mozgásszenzort, és olvasd le RO-01 első méréseit!',
+    location: 'scrapyard',
+    buildingName: 'Szeméttelep – Régi Mozgásszenzor',
+    points: 15,
+    xpReward: 60,
+    difficulty: 'beginner',
+    active: true,
+    discoveryId: 'kinematics-path-time',
+    unlocksStoryEvent: 'event-ro01-first-measurement',
+    challenge: {
+      id: 'ch-k01-first-steps',
+      type: 'kinematics-path',
+      prompt:
+        'RO-01 az ébredési ponttól (vonatkoztatási pont: 0 m) indult el, megkerülte az útját elzáró rozsdás ládát, és eljutott a mozgásszenzorig. Aktiváld a szenzor kalibrációját, hasonlítsd össze a ténylegesen bejárt utat (s) a légvonalbeli elmozdulással (Δr), majd válaszolj a kérdésre!',
+      question:
+        'Miért mért a mozgásszenzor nagyobb megtett utat (s = 11,5 m), mint amennyi az ébredési pont és a szenzor közötti egyenes távolság, vagyis az elmozdulás nagysága (|Δr| = 8,5 m)?',
+      options: [
+        {
+          id: 'opt-k01-1',
+          text: 'Mert a megtett út (s) a ténylegesen bejárt görbe pálya teljes hossza a láda megkerülésével, míg az elmozdulás (Δr) a kezdő- és végpontot összekötő legrövidebb irányított szakasz.',
+          isCorrect: true,
+          explanation:
+            'Pontosan! „Érdekes. Eddig csak mozogtam. Most viszont elkezdtem mérni is, amit csinálok. Talán ez a különbség aközött, hogy valami megtörténik velem, és aközött, hogy megértem, mi történt.”',
+        },
+        {
+          id: 'opt-k01-2',
+          text: 'Mert a megtett út és az elmozdulás mindig pontosan ugyanazt jelenti, a különbséget csak a szenzor rozsdásodása okozta.',
+          isCorrect: false,
+          explanation:
+            'Nem! A fizikában a megtett út (s) és az elmozdulás (Δr) két különböző fogalom: kerülőút esetén a megtett út mindig nagyobb, mint az elmozdulás nagysága!',
+        },
+        {
+          id: 'opt-k01-3',
+          text: 'Mert az elmozdulás az eltelt időt méri másodpercben, az út pedig a sebességet.',
+          isCorrect: false,
+          explanation:
+            'Mind az utat (s), mind az elmozdulás nagyságát (|Δr|) méterben (m) mérjük, az idő jele t és mértékegysége a másodperc (s).',
+        },
+      ],
+      hint: 'Gondolj arra, hogy egyenesen át tudtál-e menni a rozsdás ládán, vagy kerülőutat kellett tenned!',
+    },
+  },
+  {
+    id: 'quest-k02-speed',
+    lessonId: 2,
+    lessonTitle: '02. küldetés – Sebesség és Mértékegység-átváltás (v = s / t)',
+    title: '02. küldetés – Sebesség: Mennyire vagyok lassú?',
+    description:
+      'RO-01 szeretné összehasonlítani saját mozgását a szeméttelep szállítószalagjával és egy régi teherszállító drónnal. Ehhez meg kell értenie az átlagsebesség (v = s / t) fogalmát és a m/s ↔ km/h átváltást!',
+    objective: 'Végy részt a sebességmérő kísérletben a mozgásszenzornál vagy a Kutatóállomáson!',
+    location: 'scrapyard',
+    buildingName: 'Szeméttelep – Sebességmérő Próbapad',
+    points: 15,
+    xpReward: 70,
+    difficulty: 'beginner',
+    requiredQuestId: 'quest-k01-first-steps',
+    active: true,
+    discoveryId: 'kinematics-speed',
+    unlocksStoryEvent: 'event-ro01-speed-calibrated',
+    challenge: {
+      id: 'ch-k02-speed',
+      type: 'kinematics-speed',
+      prompt:
+        'Mérd meg RO-01 mozgását: ha a robot s = 20 méter utat tesz meg t = 4 másodperc alatt, mekkora az átlagsebessége m/s-ban, és mennyi ez km/h-ra átszámítva (váltószám: 3,6)?',
+      question:
+        'Ha RO-01 20 métert tesz meg 4 másodperc alatt, mekkora az átlagsebessége m/s-ban és km/h-ban?',
+      options: [
+        {
+          id: 'opt-k02-1',
+          text: 'v = 20 m / 4 s = 5 m/s, ami 5 · 3,6 = 18 km/h átlagsebességnek felel meg.',
+          isCorrect: true,
+          explanation:
+            'Hibátlan számítás! v = s / t = 20 / 4 = 5 m/s. Mivel 1 m/s = 3,6 km/h, ezért 5 m/s = 18 km/h. RO-01 máris egy futó ember tempójával képes haladni!',
+        },
+        {
+          id: 'opt-k02-2',
+          text: 'v = 20 · 4 = 80 m/s, ami 80 / 3,6 = 22,2 km/h.',
+          isCorrect: false,
+          explanation:
+            'Vigyázz! Az átlagsebességet a megtett út és az eltelt idő hányadosaként (v = s / t) számítjuk, nem szorzással!',
+        },
+        {
+          id: 'opt-k02-3',
+          text: 'v = 5 m/s, ami 5 / 3,6 = 1,39 km/h.',
+          isCorrect: false,
+          explanation:
+            'Az 5 m/s helyes, de m/s-ról km/h-ra való átváltáskor szorozni kell 3,6-del (hiszen 1 órában 3600 másodperc van, 1 km pedig 1000 m: 3600/1000 = 3,6)!',
+        },
+      ],
+      hint: 'Használd a v = s / t képletet, majd az eredményt szorozd meg 3,6-del!',
+    },
+  },
+  {
+    id: 'quest-k03-acceleration',
+    lessonId: 3,
+    lessonTitle: '03. küldetés – Gyorsulás és Sebességváltozás (a = Δv / Δt)',
+    title: '03. küldetés – Gyorsulás: A szervók felpörgetése',
+    description:
+      'RO-01 észreveszi, hogy elinduláskor nem azonnal éri el a végsebességét: a sebessége másodpercről másodpercre változik. Vizsgáld meg a gyorsulást (a = Δv / Δt), és segíts megkülönböztetni a sebességet a gyorsulástól!',
+    objective: 'Teszteld RO-01 lábszervóinak gyorsulását a szimulátorban!',
+    location: 'scrapyard',
+    buildingName: 'Szeméttelep – Szervó & Gyorsulás Tesztpad',
+    points: 15,
+    xpReward: 80,
+    difficulty: 'beginner',
+    requiredQuestId: 'quest-k02-speed',
+    active: true,
+    discoveryId: 'kinematics-acceleration',
+    unlocksUpgradeId: 'upg-energy-module',
+    unlocksStoryEvent: 'event-ro01-servos-repaired',
+    challenge: {
+      id: 'ch-k03-acceleration',
+      type: 'kinematics-acceleration',
+      prompt:
+        'RO-01 nyugalmi helyzetből (v₀ = 0 m/s) indulva Δt = 3 másodperc alatt egyenletesen felgyorsul v = 6 m/s sebességre, majd ezután állandó, 6 m/s sebességgel halad tovább. Vizsgáld meg a két szakasz gyorsulását!',
+      question:
+        'Mekkora volt RO-01 gyorsulása az első 3 másodperces felgyorsulási szakaszban, és mekkora a gyorsulása utána, amikor állandó 6 m/s sebességgel halad?',
+      options: [
+        {
+          id: 'opt-k03-1',
+          text: 'Induláskor a = Δv / Δt = 6 / 3 = 2 m/s², az állandó 6 m/s sebességű szakaszon pedig a gyorsulás 0 m/s² (mivel ott nem változik a sebesség).',
+          isCorrect: true,
+          explanation:
+            'Kiváló fizikai szemlélet! A gyorsulás a sebesség változásának üteme (a = Δv / Δt). Amikor a sebesség állandó (Δv = 0), a gyorsulás nulla, bármilyen gyorsan is halad a test!',
+        },
+        {
+          id: 'opt-k03-2',
+          text: 'Mindkét szakaszon 6 m/s² a gyorsulás, mert a robot 6 m/s-mal megy.',
+          isCorrect: false,
+          explanation:
+            'Ne keverd össze a sebességet (v) a gyorsulással (a)! Ha a sebesség nem változik, a gyorsulás nulla.',
+        },
+        {
+          id: 'opt-k03-3',
+          text: 'Induláskor 18 m/s², utána pedig 2 m/s².',
+          isCorrect: false,
+          explanation:
+            'A gyorsulást a sebességváltozás és az idő hányadosaként számítjuk: a = (6 - 0) / 3 = 2 m/s².',
+        },
+      ],
+      hint: 'Számítsd ki: a = (v - v₀) / Δt. Mi történik Δv értékével, ha a sebesség már nem változik?',
+    },
+  },
+  {
+    id: 'quest-01-electrostatics',
+    lessonId: 4,
+    lessonTitle: '04. A furcsa erő: elektrosztatikus alapjelenségek',
     title: 'Az ébredés és a rejtélyes vonzás',
     description:
       'Ébredésed után a saját optikai és mozgató áramköreid még instabilak. Keresd meg a szabadtéri Kutatóállomást (z = -16), és vizsgáld meg, hogyan hozható létre láthatatlan erő pusztán dörzsöléssel!',

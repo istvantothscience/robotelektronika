@@ -22,6 +22,7 @@ import {
   CompanionState,
   EngineeringToolCapability,
   InteractionCategory,
+  KinematicsTelemetryState,
 } from '../types/game';
 import { soundManager } from '../audio/soundManager';
 import confetti from 'canvas-confetti';
@@ -104,13 +105,24 @@ export interface GameStoreState {
   storyEvents: string[];
   inspectedAmbientIds: string[];
 
-  // World & Coordinates
+  // World, Cinematic Intro, RO-01 Speech Bubbles & Kinematics Telemetry
   currentLocationName: string;
   playerCoordinates: { x: number; z: number; angle: number };
   activeTowerLevel: number; // 1 to 6
   selectedTowerLevelPreview: number | null;
+  showCinematicIntro: boolean;
   showIntroStory: boolean;
   introDialogStep: number;
+  activeSpeechBubble: {
+    id: string;
+    speaker: string;
+    title: string;
+    text: string;
+    status?: string;
+  } | null;
+  spokenBubbleIds: string[];
+  lastCollisionBubbleTime: number;
+  kinematicsTelemetry: KinematicsTelemetryState;
 
   // Interactivity & UI states
   interactionTarget: {
@@ -146,6 +158,14 @@ export interface GameStoreState {
   toasts: ToastNotification[];
 
   // Actions
+  finishCinematicIntro: () => void;
+  replayCinematicIntro: () => void;
+  triggerSpeechBubble: (
+    bubble: { id: string; speaker: string; title: string; text: string; status?: string },
+    allowRepeatAfterMs?: number
+  ) => void;
+  dismissSpeechBubble: () => void;
+  updateKinematicsTelemetry: (partial: Partial<KinematicsTelemetryState>) => void;
   advanceIntroDialog: () => void;
   dismissIntroStory: () => void;
   setPlayerCoordinates: (x: number, z: number, angle: number) => void;
@@ -331,8 +351,22 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     playerCoordinates: { x: 0, z: 11, angle: 0 },
     activeTowerLevel: 1,
     selectedTowerLevelPreview: null,
-    showIntroStory: true,
+    showCinematicIntro: true,
+    showIntroStory: false,
     introDialogStep: 0,
+    activeSpeechBubble: null,
+    spokenBubbleIds: [],
+    lastCollisionBubbleTime: 0,
+    kinematicsTelemetry: {
+      distanceTraveled: 0,
+      displacement: 0,
+      movementTime: 0,
+      currentSpeed: 0,
+      currentAcceleration: 0,
+      crateBypassed: false,
+      sensorReached: false,
+      hasMovedOnce: false,
+    },
     interactionTarget: null,
     activeModal: null,
     activeMenuTab: 'quests',
@@ -349,6 +383,55 @@ export const useGameStore = create<GameStoreState>((set, get) => {
     quality: 'high',
     isMuted: false,
     toasts: [],
+
+    finishCinematicIntro: () => {
+      soundManager.playTerminalClick();
+      set({
+        showCinematicIntro: false,
+        showIntroStory: true,
+        introDialogStep: 0,
+      });
+    },
+
+    replayCinematicIntro: () => {
+      soundManager.playTerminalClick();
+      set({
+        showCinematicIntro: true,
+        activeModal: null,
+      });
+    },
+
+    triggerSpeechBubble: (bubble, allowRepeatAfterMs) => {
+      const state = get();
+      const now = Date.now();
+      if (allowRepeatAfterMs) {
+        if (now - state.lastCollisionBubbleTime < allowRepeatAfterMs) return;
+        set({
+          activeSpeechBubble: bubble,
+          lastCollisionBubbleTime: now,
+        });
+        return;
+      }
+      if (state.spokenBubbleIds.includes(bubble.id)) return;
+      set({
+        activeSpeechBubble: bubble,
+        spokenBubbleIds: [...state.spokenBubbleIds, bubble.id],
+      });
+    },
+
+    dismissSpeechBubble: () => {
+      soundManager.playTerminalClick();
+      set({ activeSpeechBubble: null });
+    },
+
+    updateKinematicsTelemetry: (partial) => {
+      set((state) => ({
+        kinematicsTelemetry: {
+          ...state.kinematicsTelemetry,
+          ...partial,
+        },
+      }));
+    },
 
     advanceIntroDialog: () => {
       soundManager.playTerminalClick();
@@ -496,6 +579,16 @@ export const useGameStore = create<GameStoreState>((set, get) => {
 
       if (quest.unlocksUpgradeId) {
         get().unlockUpgrade(quest.unlocksUpgradeId);
+      }
+
+      if (questId === 'quest-k01-first-steps') {
+        get().triggerSpeechBubble({
+          id: 'bubble-k01-completed',
+          speaker: 'RO-01',
+          title: '01. KÜLDETÉS TELJESÍTVE — AZ ELSŐ MÉRÉSEK',
+          text: '„Érdekes. Eddig csak mozogtam. Most viszont elkezdtem mérni is, amit csinálok. Talán ez a különbség aközött, hogy valami megtörténik velem, és aközött, hogy megértem, mi történt.”',
+          status: 'Következő cél: 02. küldetés – Sebesség (v = s / t)',
+        });
       }
 
       return true;

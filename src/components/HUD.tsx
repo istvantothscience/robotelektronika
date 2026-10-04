@@ -32,6 +32,9 @@ export const HUD: React.FC = () => {
     companion,
     upgrades,
     loreMemories,
+    kinematicsTelemetry,
+    replayCinematicIntro,
+    openExperimentForQuest,
     openModal,
     openWorldInteraction,
   } = useGameStore();
@@ -70,12 +73,21 @@ export const HUD: React.FC = () => {
               </div>
             </div>
             <span className="text-[9px] font-bold tracking-[0.25em] text-slate-400 uppercase font-mono mt-0.5">
-              PHYSICS ADVENTURE · EGYSÉG #734
+              RO-01 · KINEMATIKA & FIZIKA KALAND
             </span>
           </div>
 
           {/* Quick Action Buttons for Upgrades, Companion, Side Quests & Lore */}
           <div className="hidden md:flex items-center gap-2 bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-xl p-1.5 shadow-xl">
+            <button
+              onClick={replayCinematicIntro}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-xs text-cyan-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="RO-01 4-jelenetes bevezető történetének újrajátszása"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>RO-01 Bevezető</span>
+            </button>
+
             <button
               onClick={() => openModal('menu', 'upgrades')}
               className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-amber-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
@@ -206,11 +218,42 @@ export const HUD: React.FC = () => {
             ))}
           </div>
 
-          {/* Reward & Companion Hint Footer */}
-          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-800/80 text-[10px] font-mono">
-            <span className="text-cyan-300">
-              VOLT-7 Bizalom: {companion.trustPoints}%
-            </span>
+          {/* Live RO-01 Kinematics Telemetry Strip */}
+          <div className="mt-2.5 p-2 rounded-xl bg-slate-900/95 border border-slate-800 grid grid-cols-4 gap-1.5 text-center font-mono">
+            <div>
+              <div className="text-[9px] text-slate-400">Út (s)</div>
+              <div className="text-[11px] font-bold text-cyan-300 tabular-nums">
+                {kinematicsTelemetry.distanceTraveled} m
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-slate-400">|Δr|</div>
+              <div className="text-[11px] font-bold text-amber-300 tabular-nums">
+                {kinematicsTelemetry.displacement} m
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-slate-400">Idő (t)</div>
+              <div className="text-[11px] font-bold text-emerald-300 tabular-nums">
+                {kinematicsTelemetry.movementTime} s
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-slate-400">Seb. (v)</div>
+              <div className="text-[11px] font-bold text-white tabular-nums">
+                {kinematicsTelemetry.currentSpeed} m/s
+              </div>
+            </div>
+          </div>
+
+          {/* Reward & Direct Lab Action Footer */}
+          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-mono">
+            <button
+              onClick={() => openExperimentForQuest(currentQuest.id)}
+              className="text-cyan-400 hover:text-cyan-300 font-bold underline underline-offset-2 cursor-pointer"
+            >
+              Kísérlet megnyitása ➔
+            </button>
             <span className="text-amber-400 font-bold tabular-nums">
               +{currentQuest.points} PONT · +{currentQuest.xpReward || 60} XP
             </span>

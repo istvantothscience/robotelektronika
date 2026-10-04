@@ -1094,6 +1094,133 @@ export class WorldGenerator {
     this.colliders.push(
       new THREE.Box3(new THREE.Vector3(-5.0, 0, -15.1), new THREE.Vector3(-3.4, 1.8, -13.9))
     );
+
+    // 6. RO-01 KINEMATICS QUEST 01: Rusted Industrial Crate Obstacle at (0, 0, 6.8)
+    // Blocks the direct straight line from Awakening Pad (0, 11) to Old Motion Sensor (0, 2.5)
+    // so the player must take a detour (s > |Δr|)!
+    const crateGroup = new THREE.Group();
+    crateGroup.position.set(0, 0, 6.8);
+
+    const m = ProceduralMeshFactory.materials;
+    const mainCrate = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 1.35, 1.65),
+      m.rustIron
+    );
+    mainCrate.position.y = 0.675;
+    mainCrate.castShadow = true;
+    mainCrate.receiveShadow = true;
+    crateGroup.add(mainCrate);
+
+    // Hazard yellow-black warning stripe bar & brass corner braces on the crate
+    const hazardBar = new THREE.Mesh(
+      new THREE.BoxGeometry(2.56, 0.22, 1.7),
+      m.hazardYellow
+    );
+    hazardBar.position.y = 0.95;
+    crateGroup.add(hazardBar);
+
+    const topSubCrate = new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, 0.65, 0.95),
+      m.weatheredPlating
+    );
+    topSubCrate.position.set(-0.4, 1.67, 0.1);
+    topSubCrate.rotation.y = 0.18;
+    topSubCrate.castShadow = true;
+    crateGroup.add(topSubCrate);
+
+    this.rootGroup.add(crateGroup);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-1.35, 0, 5.85), new THREE.Vector3(1.35, 2.0, 7.75))
+    );
+
+    // 7. RO-01 KINEMATICS QUEST 01: Old Motion Sensor & Path Telemetry Pylon at (0, 0, 2.5)
+    const sensorGroup = new THREE.Group();
+    sensorGroup.position.set(0, 0, 2.5);
+
+    const sensorBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.68, 0.85, 0.36, 12),
+      m.darkChassis
+    );
+    sensorBase.position.y = 0.18;
+    sensorBase.castShadow = true;
+    sensorGroup.add(sensorBase);
+
+    const sensorColumn = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.28, 1.65, 10),
+      m.copper
+    );
+    sensorColumn.position.y = 1.1;
+    sensorColumn.castShadow = true;
+    sensorGroup.add(sensorColumn);
+
+    const sensorScreen = new THREE.Mesh(
+      new THREE.BoxGeometry(0.95, 0.62, 0.18),
+      m.brass
+    );
+    sensorScreen.position.set(0, 1.45, 0.22);
+    sensorScreen.rotation.x = -0.22;
+    sensorGroup.add(sensorScreen);
+
+    const sensorGlowFace = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.48, 0.04),
+      m.glowCyan
+    );
+    sensorGlowFace.position.set(0, 1.45, 0.31);
+    sensorGlowFace.rotation.x = -0.22;
+    sensorGroup.add(sensorGlowFace);
+
+    const sensorRadarRing = ProceduralMeshFactory.createTrueToothedGear(0.45, 0.08, 12, 'brass', 4);
+    sensorRadarRing.position.set(0, 2.15, 0);
+    sensorGroup.add(sensorRadarRing);
+    this.rotatingGears.push({ gear: sensorRadarRing, speed: 1.6, axis: 'y' });
+
+    this.rootGroup.add(sensorGroup);
+    this.colliders.push(
+      new THREE.Box3(new THREE.Vector3(-0.75, 0, 1.75), new THREE.Vector3(0.75, 2.2, 3.25))
+    );
+
+    // 8. Speed & Acceleration Test Pedestals at (-5.2, 0, -1.8) and (5.2, 0, -1.8)
+    [
+      [-5.2, -1.8, m.glowCyan],
+      [5.2, -1.8, m.glowAmber],
+    ].forEach(([px, pz, glowMat]) => {
+      const ped = new THREE.Group();
+      ped.position.set(px as number, 0, pz as number);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 1.1), m.weatheredPlating);
+      base.position.y = 0.55;
+      base.castShadow = true;
+      ped.add(base);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 0.8), glowMat as THREE.Material);
+      top.position.y = 1.15;
+      ped.add(top);
+      this.rootGroup.add(ped);
+      this.colliders.push(
+        new THREE.Box3(
+          new THREE.Vector3((px as number) - 0.8, 0, (pz as number) - 0.65),
+          new THREE.Vector3((px as number) + 0.8, 1.4, (pz as number) + 0.65)
+        )
+      );
+    });
+
+    // 9. Discarded Household Appliances (Coffee Maker & Vacuum) at (-2.6, 0, 9.2)
+    const householdScrap = new THREE.Group();
+    householdScrap.position.set(-2.6, 0, 9.2);
+    const coffeeBoiler = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.34, 0.68, 12),
+      m.copper
+    );
+    coffeeBoiler.position.set(0, 0.34, 0);
+    coffeeBoiler.rotation.z = 0.25;
+    coffeeBoiler.castShadow = true;
+    householdScrap.add(coffeeBoiler);
+
+    const vacuumDrum = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 12, 10),
+      m.rustIron
+    );
+    vacuumDrum.position.set(0.55, 0.28, 0.25);
+    householdScrap.add(vacuumDrum);
+    this.rootGroup.add(householdScrap);
   }
 
   private buildQuestBeacons(spec: LevelEnvironmentSpec) {

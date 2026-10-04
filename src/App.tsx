@@ -6,6 +6,7 @@ import { MenuModal } from './components/MenuModal';
 import { WorldInteractionModal } from './components/WorldInteractionModal';
 import { NotificationToast } from './components/NotificationToast';
 import { StoryDialogBubble } from './components/StoryDialogBubble';
+import { CinematicIntroOverlay } from './components/CinematicIntroOverlay';
 import { useGameStore } from './store/useGameStore';
 
 export default function App() {
@@ -19,10 +20,13 @@ export default function App() {
       {/* Primary In-Game HUD */}
       <HUD />
 
-      {/* Opening Story Monologue Speech Bubble */}
+      {/* RO-01 Opening Story & Contextual Speech Bubbles */}
       <StoryDialogBubble />
 
-      {/* Interactive Physics & Electrostatics Laboratory Experiment Modal (Main Quests) */}
+      {/* RO-01 4-Scene Cinematic Intro Overlay */}
+      <CinematicIntroOverlay />
+
+      {/* Interactive Physics, Kinematics & Electrostatics Laboratory Experiment Modal (Main Quests) */}
       {activeModal === 'experiment' && <ExperimentModal />}
 
       {/* 3-Category World Interaction Modal (Ambient Inspections, Companion VOLT-7, Side Quests & Homework) */}

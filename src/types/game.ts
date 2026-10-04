@@ -17,6 +17,9 @@ export interface UserProfile {
 }
 
 export type ChallengeType =
+  | 'kinematics-path'
+  | 'kinematics-speed'
+  | 'kinematics-acceleration'
   | 'observation'
   | 'coulomb-balance'
   | 'conductor-grounding'
@@ -212,11 +215,22 @@ export interface Quest {
 export interface Discovery {
   id: string;
   title: string;
-  category: 'Elektrosztatika' | 'Áramkörök' | 'Mágnesesség' | 'Micro:bit' | 'Elektronika';
+  category: 'Kinematika' | 'Elektrosztatika' | 'Áramkörök' | 'Mágnesesség' | 'Micro:bit' | 'Elektronika';
   description: string;
   formula?: string;
   keyTakeaway: string;
   unlockedAt?: string;
+}
+
+export interface KinematicsTelemetryState {
+  distanceTraveled: number; // s (m)
+  displacement: number;     // Δr (m) from awakening pad (0, 11)
+  movementTime: number;     // t (s)
+  currentSpeed: number;     // v (m/s)
+  currentAcceleration: number; // a (m/s²)
+  crateBypassed: boolean;
+  sensorReached: boolean;
+  hasMovedOnce: boolean;
 }
 
 export interface QuestCompletion {

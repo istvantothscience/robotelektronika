@@ -158,6 +158,86 @@ class SoundManager {
       osc.stop(this.ctx.currentTime + idx * 0.08 + 0.55);
     });
   }
+
+  // Metallic clank/thud when RO-01 bumps into a solid crate or obstacle
+  public playCollisionThud() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(38, this.ctx.currentTime + 0.14);
+
+    gain.gain.setValueAtTime(0.14, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.16);
+  }
+
+  // Distant rolling thunder for Opening Scene 1 & 2
+  public playThunderRumble() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const duration = 1.4;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.55));
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(160, this.ctx.currentTime);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.22, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    noise.start();
+  }
+
+  // High-energy lightning strike + reboot surge for Opening Scene 3
+  public playLightningStrike() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    this.playThunderRumble();
+    this.playElectricSpark();
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(220, this.ctx.currentTime + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.65);
+
+    gain.gain.setValueAtTime(0.15, this.ctx.currentTime + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.7);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(this.ctx.currentTime + 0.1);
+    osc.stop(this.ctx.currentTime + 0.72);
+  }
 }
 
 export const soundManager = new SoundManager();
+
