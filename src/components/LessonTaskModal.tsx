@@ -1,5 +1,6 @@
 import React, { useId, useMemo } from 'react';
-import { CheckCircle2, ExternalLink, ImagePlus, Lock, X } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Lock, X } from 'lucide-react';
+import { HairStyler } from './HairStyler';
 import { useLessonStore, type SyncStatus } from '../lesson1/lessonStore';
 import { PHET_URL, npcForComponent } from '../lesson1/npcs';
 import { OPTIONAL_COMPONENTS, OPTIONAL_LIMIT, type ComponentId } from '../lesson1/config';
@@ -19,17 +20,6 @@ const SYNC_LABEL: Record<SyncStatus, string> = {
   demo: 'Demó mód: nem kerül a Pontkövetőbe',
   error: 'Hiba a mentésnél',
 };
-
-/** A feltöltött fotót kicsinyítve, csak az eszközön tároljuk (nincs szerver). */
-async function downscale(file: File, maxSide = 800): Promise<string> {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.72);
-}
 
 export const LessonTaskModal: React.FC = () => {
   const s = useLessonStore();
@@ -164,32 +154,7 @@ export const LessonTaskModal: React.FC = () => {
                 Két mondat: miért áll fel a haj a lufi után, és miért nem áll fel a lufi nélkül? (legalább {M3_MIN_TEXT} karakter, most {s.m3.text.trim().length})
                 <textarea rows={4} className={`${inputCls} mt-1`} value={s.m3.text} onChange={(e) => s.setM3({ text: e.target.value })} />
               </label>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
-                <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-mono text-slate-100 cursor-pointer">
-                  <ImagePlus className="w-4 h-4" /> Fénykép csatolása a rajzról
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      try {
-                        s.setM3({ photo: await downscale(f) });
-                      } catch {
-                        /* nem képfájl: figyelmen kívül hagyjuk */
-                      }
-                    }}
-                  />
-                </label>
-                <p className="text-[11px] text-slate-400">A fénykép kicsinyítve, csak ezen az eszközön tárolódik. A tanár egyelőre nem látja; a rajzot a füzetben mutasd meg.</p>
-                {s.m3.photo && (
-                  <div className="flex items-end gap-3">
-                    <img src={s.m3.photo} alt="A csatolt rajz" className="max-h-40 rounded-lg border border-slate-700" />
-                    <button onClick={() => s.setM3({ photo: null })} className="text-xs font-mono text-rose-300 underline cursor-pointer">Eltávolítás</button>
-                  </div>
-                )}
-              </div>
+              <HairStyler photo={s.m3.photo} onAttach={(p) => s.setM3({ photo: p })} />
               <div>{submitBtn()}</div>
             </div>
           )}
