@@ -2,7 +2,7 @@ import React from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { ChevronRight, X } from 'lucide-react';
 
-const RO01_PORTRAIT_SRC = '/src/assets/images/ro01_scene4_awakening_1791133330595.jpg';
+import RO01_PORTRAIT_SRC from '../assets/images/ro01_scene4_awakening_1791133330595.jpg';
 
 export const StoryDialogBubble: React.FC = () => {
   const {

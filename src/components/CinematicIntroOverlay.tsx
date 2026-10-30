@@ -2,22 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { soundManager } from '../audio/soundManager';
 import { Zap, ChevronRight, ChevronLeft, FastForward, Volume2 } from 'lucide-react';
+// A Vite csomagolja és hash-eli a képeket, így az éles buildben is megtalálhatók (a '/src/...' út csak fejlesztői szerveren él)
+import scene1Img from '../assets/images/ro01_scene1_disassembly_1791133300252.jpg';
+import scene2Img from '../assets/images/ro01_scene2_junkyard_1791133312544.jpg';
+import scene3Img from '../assets/images/ro01_scene3_lightning_1791133320083.jpg';
+import scene4Img from '../assets/images/ro01_scene4_awakening_1791133330595.jpg';
 
 const SCENE_IMAGES: Record<1 | 2 | 3 | 4, { src: string; alt: string }> = {
   1: {
-    src: '/src/assets/images/ro01_scene1_disassembly_1791133300252.jpg',
+    src: scene1Img,
     alt: 'RO-01 a szerelőműhely fémasztalán a selejtezés előtt',
   },
   2: {
-    src: '/src/assets/images/ro01_scene2_junkyard_1791133312544.jpg',
+    src: scene2Img,
     alt: 'RO-01 az eső áztatta ipari szeméttelepen éjszaka',
   },
   3: {
-    src: '/src/assets/images/ro01_scene3_lightning_1791133320083.jpg',
+    src: scene3Img,
     alt: 'Villámcsapás és elektromos kisülés ébreszti fel RO-01 áramköreit',
   },
   4: {
-    src: '/src/assets/images/ro01_scene4_awakening_1791133330595.jpg',
+    src: scene4Img,
     alt: 'RO-01 első ébredése, világító ciánkék optikai érzékelővel',
   },
 };
