@@ -9,6 +9,12 @@
  */
 
 import { QuestCompletion, UserProfile, BackendSyncState, HomeworkSubmissionRecord } from '../types/game';
+import { supabase, SUPABASE_URL, SUPABASE_KEY } from './supabaseClient';
+
+/** A Pontkövetőben ezen az app-azonosítón és témakör-néven jelennek meg a játékból szerzett pontok. */
+export const SCORE_APP_ID = 'robotelektronika';
+export const SCORE_TOPIC = 'Elektronika';
+export const DEMO_USER_ID = 'student-demo-8b-42';
 
 const STORAGE_KEYS = {
   SUPABASE_URL: 'stempunk_supabase_url',
@@ -50,8 +56,8 @@ class PointTrackerService {
   private listeners: Array<(state: BackendSyncState) => void> = [];
 
   constructor() {
-    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
-    const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
+    const envUrl = SUPABASE_URL;
+    const envKey = SUPABASE_KEY;
     const envVercel = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_POINT_TRACKER_API_URL) || '';
 
     this.config = {
@@ -117,7 +123,7 @@ class PointTrackerService {
         },
       });
 
-      if (res.ok || res.status === 200 || res.status === 404) {
+      if (res.status < 500) {
         this.syncState.isConnected = true;
         this.syncState.lastError = null;
         this.syncState.lastSyncTime = new Date().toLocaleTimeString('hu-HU');
@@ -150,13 +156,23 @@ class PointTrackerService {
     localStorage.setItem(STORAGE_KEYS.USER_SESSION, JSON.stringify(user));
   }
 
-  public getCompletions(): QuestCompletion[] {
+  private readAllCompletions(): QuestCompletion[] {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.COMPLETIONS);
       return stored ? JSON.parse(stored) : [];
     } catch {
       return [];
     }
+  }
+
+  /** Csak az aktuális felhasználó teljesítései (közös gépen több diák is játszhat). */
+  public getCompletions(): QuestCompletion[] {
+    const uid = this.getCurrentUser().id;
+    return this.readAllCompletions().filter((c) => c.userId === uid);
+  }
+
+  public isDemoUser(): boolean {
+    return this.getCurrentUser().id === DEMO_USER_ID;
   }
 
   public isQuestCompleted(questId: string): boolean {
@@ -174,7 +190,7 @@ class PointTrackerService {
     attemptData: QuestCompletion['attemptData']
   ): Promise<{ success: boolean; isDuplicate: boolean; pointsAwarded: number; syncStatus: 'synced' | 'queued_offline' | 'already_completed' }> {
     const user = this.getCurrentUser();
-    const existing = this.getCompletions();
+    const existing = this.readAllCompletions();
 
     // Idempotency check: student cannot earn double points for the same quest
     const alreadyDone = existing.find((c) => c.questId === questId && c.userId === user.id);
@@ -222,40 +238,36 @@ class PointTrackerService {
     };
   }
 
+  /**
+   * Pont küldése a közös Pontkövetőbe (`app_submit_score`). A szerver a JWT-ből tudja, melyik
+   * osztály melyik diákja játszik, és oda írja a pontot. Idempotens: küldetésenként egyszer (`once`).
+   * Demó felhasználónál nincs bejelentkezés → nincs szinkron (a pont csak helyben él).
+   */
   private async sendCompletionToRemote(completion: QuestCompletion): Promise<boolean> {
-    if (!this.config.supabaseUrl || !this.config.supabaseAnonKey) return false;
+    if (completion.userId === DEMO_USER_ID) return true;
 
-    // Prefer dedicated Vercel bridge if set, else direct Supabase RPC / REST table
-    const endpoint = this.config.vercelApiUrl
-      ? `${this.config.vercelApiUrl}/api/complete-quest`
-      : `${this.config.supabaseUrl}/rest/v1/quest_completions`;
+    const { data } = await supabase.auth.getSession();
+    // Csak a ténylegesen bejelentkezett diák saját pontját küldhetjük (a szerver a JWT-t használja)
+    if (!data.session || data.session.user.id !== completion.userId) return false;
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      apikey: this.config.supabaseAnonKey,
-      Authorization: `Bearer ${this.config.supabaseAnonKey}`,
-      Prefer: 'return=minimal',
-    };
-
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        id: completion.id,
-        user_id: completion.userId,
-        quest_id: completion.questId,
-        points_awarded: completion.pointsAwarded,
-        completed_at: completion.completedAt,
-        attempt_data: completion.attemptData,
-      }),
+    const { error } = await supabase.rpc('app_submit_score', {
+      p_app: SCORE_APP_ID,
+      p_topic: SCORE_TOPIC,
+      p_item: completion.questId,
+      p_points: completion.pointsAwarded,
+      p_category: 'feladat',
+      p_note: `Főküldetés: ${completion.questId}`,
+      p_mode: 'once',
     });
-
-    if (res.ok || res.status === 201) {
-      this.syncState.lastSyncTime = new Date().toLocaleTimeString('hu-HU');
+    if (error) {
+      this.syncState.lastError = error.message;
       this.notify();
-      return true;
+      return false;
     }
-    return false;
+    this.syncState.lastError = null;
+    this.syncState.lastSyncTime = new Date().toLocaleTimeString('hu-HU');
+    this.notify();
+    return true;
   }
 
   private enqueuePending(completion: QuestCompletion) {
@@ -278,13 +290,15 @@ class PointTrackerService {
 
   public async processPendingQueue() {
     if (!this.syncState.isConnected) return;
-    const queue = this.getPendingQueue();
+    const all = this.getPendingQueue();
+    const uid = this.getCurrentUser().id;
+    const queue = all.filter((c) => c.userId === uid);
     if (queue.length === 0) return;
 
     this.syncState.isSyncing = true;
     this.notify();
 
-    const remaining: QuestCompletion[] = [];
+    const remaining: QuestCompletion[] = all.filter((c) => c.userId !== uid);
     for (const item of queue) {
       try {
         const ok = await this.sendCompletionToRemote(item);
@@ -301,7 +315,8 @@ class PointTrackerService {
   }
 
   private updatePendingCount() {
-    this.syncState.pendingCompletionsCount = this.getPendingQueue().length;
+    const uid = this.getCurrentUser().id;
+    this.syncState.pendingCompletionsCount = this.getPendingQueue().filter((c) => c.userId === uid).length;
     this.notify();
   }
 
@@ -311,6 +326,11 @@ class PointTrackerService {
    * Requires teacher review ('approved') before awarding authoritative school points.
    */
   public getHomeworkSubmissions(): HomeworkSubmissionRecord[] {
+    const uid = this.getCurrentUser().id;
+    return this.readAllHomework().filter((h) => h.userId === uid);
+  }
+
+  private readAllHomework(): HomeworkSubmissionRecord[] {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS);
       return stored ? JSON.parse(stored) : [];
@@ -326,7 +346,7 @@ class PointTrackerService {
     requiresTeacherVerification: boolean
   ): HomeworkSubmissionRecord {
     const user = this.getCurrentUser();
-    const list = this.getHomeworkSubmissions();
+    const list = this.readAllHomework();
     const existingIdx = list.findIndex((h) => h.sideQuestId === sideQuestId && h.userId === user.id);
 
     const record: HomeworkSubmissionRecord = {
@@ -355,7 +375,7 @@ class PointTrackerService {
     teacherFeedback: string
   ): HomeworkSubmissionRecord | null {
     const user = this.getCurrentUser();
-    const list = this.getHomeworkSubmissions();
+    const list = this.readAllHomework();
     const idx = list.findIndex((h) => h.sideQuestId === sideQuestId && h.userId === user.id);
     if (idx < 0) return null;
 

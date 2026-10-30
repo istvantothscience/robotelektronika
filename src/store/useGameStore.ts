@@ -27,7 +27,9 @@ import {
 import { soundManager } from '../audio/soundManager';
 import confetti from 'canvas-confetti';
 
-const PROGRESSION_STORAGE_KEY = 'stempunk_progression_state_v2';
+// Felhasználónként külön mentés: közös gépen több diák is játszhat egymást nem felülírva
+const progressionKey = () =>
+  `stempunk_progression_state_v2:${pointTrackerService.getCurrentUser().id}`;
 
 interface PersistedProgressionState {
   gameXp: number;
@@ -50,7 +52,7 @@ interface PersistedProgressionState {
 
 function loadPersistedProgression(): PersistedProgressionState {
   try {
-    const raw = localStorage.getItem(PROGRESSION_STORAGE_KEY);
+    const raw = localStorage.getItem(progressionKey());
     if (raw) return JSON.parse(raw);
   } catch {
     // ignore
@@ -70,7 +72,7 @@ function loadPersistedProgression(): PersistedProgressionState {
 function savePersistedProgression(state: Partial<PersistedProgressionState>) {
   try {
     const current = loadPersistedProgression();
-    localStorage.setItem(PROGRESSION_STORAGE_KEY, JSON.stringify({ ...current, ...state }));
+    localStorage.setItem(progressionKey(), JSON.stringify({ ...current, ...state }));
   } catch {
     // ignore
   }

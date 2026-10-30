@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { DISTRICT_PROGRESSION_SPECS } from '../data/worldContent';
 import { Minimap } from './Minimap';
+import { authService } from '../services/authService';
+import { pointTrackerService, DEFAULT_STUDENT } from '../services/pointTrackerService';
+import { DEMO_FLAG_KEY } from './LoginGate';
 import {
   Zap,
   Settings,
@@ -17,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  LogOut,
 } from 'lucide-react';
 
 const readFlag = (key: string, fallback: boolean): boolean => {
@@ -83,6 +87,17 @@ export const HUD: React.FC = () => {
     { label: 'Mellékküldetés & Házi', icon: BookOpen, color: 'text-emerald-400', run: () => openModal('menu', 'side_quests') },
     { label: `Memóriák (${unlockedLoreCount}/5)`, icon: Sparkles, color: 'text-cyan-400', run: () => openModal('menu', 'lore') },
     { label: 'VOLT-7 („Szikra”)', icon: MessageSquare, color: 'text-cyan-400', run: () => openWorldInteraction('companion-volt7') },
+    {
+      label: pointTrackerService.isDemoUser() ? 'Kilépés a demóból' : 'Kijelentkezés',
+      icon: LogOut,
+      color: 'text-rose-400',
+      run: async () => {
+        await authService.signOut();
+        localStorage.removeItem(DEMO_FLAG_KEY);
+        pointTrackerService.setCurrentUser(DEFAULT_STUDENT);
+        window.location.reload();
+      },
+    },
   ];
 
   const towerLevels = [...DISTRICT_PROGRESSION_SPECS].sort(
