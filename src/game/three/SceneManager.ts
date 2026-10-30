@@ -6,6 +6,8 @@ import { PBRTextureGenerator } from './materials/PBRTextureGenerator';
 import { useGameStore } from '../../store/useGameStore';
 import { soundManager } from '../../audio/soundManager';
 import { GRAPHICS_PRESETS, GraphicsQuality } from '../../config/graphicsConfig';
+import { BEACON_TO_COMPONENT } from '../../lesson1/npcs';
+import { useLessonStore } from '../../lesson1/lessonStore';
 import { virtualInput } from '../../input/virtualInput';
 import { PostProcessingPipeline } from './postprocessing/PostProcessingPipeline';
 
@@ -305,6 +307,11 @@ export class SceneManager {
     // If an interactive modal or cinematic intro is active, do not consume WASD
     const { activeModal, showCinematicIntro } = useGameStore.getState();
     if (showCinematicIntro) return;
+    // A feladatablak szövegmezőibe gépelés nem mozgathatja a robotot
+    if (useLessonStore.getState().activeTask) {
+      if (e.key === 'Escape') useLessonStore.getState().closeTask();
+      return;
+    }
     if (activeModal !== null) {
       if (e.key === 'Escape') {
         useGameStore.getState().closeModal();
@@ -670,7 +677,9 @@ export class SceneManager {
             hint: `${beacon.promptKey} — ${beacon.subtitle}`,
             action: () => {
               const store = useGameStore.getState();
-              if (beacon.category === 'main_quest') {
+              if (beacon.category === 'main_quest' && BEACON_TO_COMPONENT[beacon.id]) {
+                useLessonStore.getState().openTask(BEACON_TO_COMPONENT[beacon.id]);
+              } else if (beacon.category === 'main_quest') {
                 if (beacon.id === 'beacon-robot-core' || beacon.id === 'beacon-tesla-array') {
                   soundManager.playElectricSpark();
                 }

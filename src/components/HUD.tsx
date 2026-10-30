@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { DISTRICT_PROGRESSION_SPECS } from '../data/worldContent';
 import { Minimap } from './Minimap';
+import { LessonMissionCard } from './LessonMissionCard';
 import { authService } from '../services/authService';
 import { pointTrackerService, DEFAULT_STUDENT } from '../services/pointTrackerService';
 import { DEMO_FLAG_KEY } from './LoginGate';
@@ -237,7 +238,9 @@ export const HUD: React.FC = () => {
 
       {/* 2. MIDDLE AREA: CURRENT MISSION (Left) & VERTICAL LEVELS RAIL (Right) */}
       <div className="flex items-start justify-between w-full my-auto pointer-events-none">
-        {/* Left Side: collapsible CURRENT MISSION card */}
+        {activeTowerLevel === 1 ? (
+          <LessonMissionCard open={missionOpen} onToggle={toggleMission} />
+        ) : (
         <div className={`pointer-events-auto bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-2xl shadow-2xl ${missionOpen ? 'w-80' : 'w-64'} transition-all`}>
           <button
             onClick={toggleMission}
@@ -337,6 +340,7 @@ export const HUD: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
         {/* Right Side: Colossal Vertical LEVELS Rail (1 to 6) with Explicit Unlock Checks */}
         <div className="pointer-events-auto flex flex-col items-end gap-1.5">

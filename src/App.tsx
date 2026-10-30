@@ -8,6 +8,8 @@ import { NotificationToast } from './components/NotificationToast';
 import { StoryDialogBubble } from './components/StoryDialogBubble';
 import { CinematicIntroOverlay } from './components/CinematicIntroOverlay';
 import { useGameStore } from './store/useGameStore';
+import { LessonTaskModal } from './components/LessonTaskModal';
+import { useLessonStore } from './lesson1/lessonStore';
 import { TouchControls } from './components/TouchControls';
 import { useIsTouch } from './input/virtualInput';
 import { LoginGate, DEMO_FLAG_KEY } from './components/LoginGate';
@@ -60,6 +62,7 @@ export default function App() {
   const { activeModal } = useGameStore();
   const authStatus = useAuthGate();
   const isTouch = useIsTouch();
+  const lessonTask = useLessonStore((st) => st.activeTask);
 
   if (authStatus === 'checking') {
     return <main className="w-screen h-screen bg-slate-950" />;
@@ -76,7 +79,9 @@ export default function App() {
       {/* Primary In-Game HUD */}
       <HUD />
 
-      {isTouch && activeModal === null && <TouchControls />}
+      {isTouch && activeModal === null && !lessonTask && <TouchControls />}
+
+      {lessonTask && <LessonTaskModal />}
 
       {/* RO-01 Opening Story & Contextual Speech Bubbles */}
       <StoryDialogBubble />
