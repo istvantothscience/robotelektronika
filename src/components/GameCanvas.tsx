@@ -51,7 +51,7 @@ export const GameCanvas: React.FC = () => {
 
       {/* Controls Helper Widget (Bottom Left) */}
       {showControlsHint && (
-        <div className="absolute bottom-6 left-6 z-10 p-3 rounded-lg bg-slate-900/85 backdrop-blur-md border border-slate-700/60 shadow-xl max-w-xs transition-opacity duration-300">
+        <div className="absolute bottom-20 right-6 z-30 p-3 rounded-lg bg-slate-900/85 backdrop-blur-md border border-slate-700/60 shadow-xl max-w-xs transition-opacity duration-300">
           <div className="flex items-center justify-between gap-3 mb-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 font-display">
               <Move className="w-3.5 h-3.5" />

@@ -13,7 +13,27 @@ import {
   MessageSquare,
   Lock,
   Sparkles,
+  Menu,
+  ChevronDown,
+  ChevronUp,
+  Layers,
 } from 'lucide-react';
+
+const readFlag = (key: string, fallback: boolean): boolean => {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+};
+const writeFlag = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+};
 
 export const HUD: React.FC = () => {
   const {
@@ -40,11 +60,30 @@ export const HUD: React.FC = () => {
   } = useGameStore();
 
   const [selectedLevelInfo, setSelectedLevelInfo] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [missionOpen, setMissionOpen] = useState(() => readFlag('hud.missionOpen', false));
+  const [districtsOpen, setDistrictsOpen] = useState(false);
+
+  const toggleMission = () => {
+    setMissionOpen((v) => {
+      writeFlag('hud.missionOpen', !v);
+      return !v;
+    });
+  };
+
 
   const currentQuest = quests.find((q) => q.id === currentQuestId) || quests[0];
   const isCompleted = completedQuestIds.includes(currentQuest.id);
   const unlockedUpgradesCount = upgrades.filter((u) => u.unlocked && u.equipped).length;
   const unlockedLoreCount = loreMemories.filter((l) => l.unlocked).length;
+
+  const menuItems = [
+    { label: 'RO-01 Bevezető', icon: Sparkles, color: 'text-cyan-400', run: replayCinematicIntro },
+    { label: `3D Modulok (${unlockedUpgradesCount}/4)`, icon: Wrench, color: 'text-amber-400', run: () => openModal('menu', 'upgrades') },
+    { label: 'Mellékküldetés & Házi', icon: BookOpen, color: 'text-emerald-400', run: () => openModal('menu', 'side_quests') },
+    { label: `Memóriák (${unlockedLoreCount}/5)`, icon: Sparkles, color: 'text-cyan-400', run: () => openModal('menu', 'lore') },
+    { label: 'VOLT-7 („Szikra”)', icon: MessageSquare, color: 'text-cyan-400', run: () => openWorldInteraction('companion-volt7') },
+  ];
 
   const towerLevels = [...DISTRICT_PROGRESSION_SPECS].sort(
     (a, b) => b.districtNumber - a.districtNumber
@@ -62,7 +101,7 @@ export const HUD: React.FC = () => {
       {/* 1. TOP HEADER ROW */}
       <div className="flex items-start justify-between w-full gap-4">
         {/* Top-Left: STEMPUNK Logo + Quick Engineering & Narrative Bar */}
-        <div className="pointer-events-auto flex flex-wrap items-center gap-4">
+        <div className="pointer-events-auto flex flex-col items-start gap-2.5">
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <span className="text-2xl font-black tracking-wider text-slate-100 font-display drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] flex items-center">
@@ -77,52 +116,37 @@ export const HUD: React.FC = () => {
             </span>
           </div>
 
-          {/* Quick Action Buttons for Upgrades, Companion, Side Quests & Lore */}
-          <div className="hidden md:flex items-center gap-2 bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-xl p-1.5 shadow-xl">
+          {/* Single dropdown menu replacing the row of quick-action buttons */}
+          <div className="relative">
             <button
-              onClick={replayCinematicIntro}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-xs text-cyan-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="RO-01 4-jelenetes bevezető történetének újrajátszása"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="px-3 py-2 rounded-xl bg-slate-950/85 backdrop-blur-md hover:bg-slate-900 border border-slate-700/70 text-xs text-slate-200 font-mono flex items-center gap-2 cursor-pointer transition-colors shadow-xl"
+              aria-expanded={menuOpen}
             >
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span>RO-01 Bevezető</span>
+              <Menu className="w-4 h-4 text-amber-400" />
+              <span>Menü</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
             </button>
-
-            <button
-              onClick={() => openModal('menu', 'upgrades')}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-amber-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="3D Robotfejlesztések és Mérnöki Eszközök"
-            >
-              <Wrench className="w-3.5 h-3.5 text-amber-400" />
-              <span>3D Modulok ({unlockedUpgradesCount}/4)</span>
-            </button>
-
-            <button
-              onClick={() => openModal('menu', 'side_quests')}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-emerald-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Mellékküldetések és Tanárilag Ellenőrzött Házi Feladatok"
-            >
-              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Mellékküldetés & Házi</span>
-            </button>
-
-            <button
-              onClick={() => openModal('menu', 'lore')}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs text-cyan-300 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Helyreállított Memóriatöredékek"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Memóriák ({unlockedLoreCount}/5)</span>
-            </button>
-
-            <button
-              onClick={() => openWorldInteraction('companion-volt7')}
-              className="px-2.5 py-1.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900/80 border border-cyan-500/50 text-xs text-cyan-200 font-mono flex items-center gap-1.5 cursor-pointer transition-colors"
-              title="Párbeszéd VOLT-7 (Szikra) társ-automatával"
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
-              <span>VOLT-7 („Szikra”)</span>
-            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute left-0 top-full mt-2 z-20 min-w-[220px] bg-slate-950/95 backdrop-blur-md border border-slate-700/70 rounded-xl p-1.5 shadow-2xl animate-fade-in">
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        item.run();
+                      }}
+                      className="w-full px-3 py-2 rounded-lg hover:bg-slate-800 text-xs text-slate-200 font-mono flex items-center gap-2.5 cursor-pointer transition-colors text-left"
+                    >
+                      <item.icon className={`w-3.5 h-3.5 ${item.color}`} />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -178,95 +202,124 @@ export const HUD: React.FC = () => {
 
       {/* 2. MIDDLE AREA: CURRENT MISSION (Left) & VERTICAL LEVELS RAIL (Right) */}
       <div className="flex items-start justify-between w-full my-auto pointer-events-none">
-        {/* Left Side: CURRENT MISSION Card */}
-        <div className="pointer-events-auto bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-2xl p-4 shadow-2xl max-w-xs transition-all">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/80 flex items-center justify-center text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]">
-                <Zap className="w-4 h-4" />
+        {/* Left Side: collapsible CURRENT MISSION card */}
+        <div className={`pointer-events-auto bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 rounded-2xl shadow-2xl ${missionOpen ? 'w-80' : 'w-64'} transition-all`}>
+          <button
+            onClick={toggleMission}
+            className="w-full flex items-center gap-2.5 p-3 text-left cursor-pointer"
+            aria-expanded={missionOpen}
+          >
+            <div className="w-7 h-7 shrink-0 rounded-lg bg-amber-500/20 border border-amber-400/80 flex items-center justify-center text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]">
+              <Zap className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                Főküldetés {completedQuestIds.length}/3 · +{currentQuest.points} pont
               </div>
-              <div>
-                <div className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
-                  AKTÍV FŐKÜLDETÉS ({completedQuestIds.length}/3)
+              <h3 className="text-xs font-bold text-white font-display tracking-wide truncate">
+                {currentQuest.title}
+              </h3>
+            </div>
+            {missionOpen ? (
+              <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+            )}
+          </button>
+
+          {!missionOpen && (
+            <div className="px-3 pb-3 -mt-1 flex items-start gap-2 text-[11px] text-slate-300">
+              {isCompleted ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+              ) : (
+                <Circle className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+              )}
+              <span className="leading-snug line-clamp-2">{currentQuest.objective}</span>
+            </div>
+          )}
+
+          {missionOpen && (
+            <div className="px-3 pb-3 animate-fade-in">
+              <p className="text-[11px] text-slate-300 leading-relaxed mb-2.5">
+                {currentQuest.description}
+              </p>
+
+              <div className="space-y-1.5 pt-2.5 border-t border-slate-800 text-[11px]">
+                {[
+                  currentQuest.objective,
+                  'Végezd el az interaktív fizikai mérést a munkapadon',
+                  'Magyarázd meg a megfigyelt jelenséget a jóváíráshoz',
+                ].map((obj: string, idx: number) => (
+                  <div key={idx} className="flex items-start gap-2 text-slate-300">
+                    {isCompleted || idx === 0 ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <Circle className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                    )}
+                    <span className="leading-snug">{obj}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-2.5 p-2 rounded-xl bg-slate-900/95 border border-slate-800 grid grid-cols-4 gap-1.5 text-center font-mono">
+                <div>
+                  <div className="text-[9px] text-slate-400">Út (s)</div>
+                  <div className="text-[11px] font-bold text-cyan-300 tabular-nums">
+                    {kinematicsTelemetry.distanceTraveled} m
+                  </div>
                 </div>
-                <h3 className="text-xs font-bold text-white font-display tracking-wide">
-                  {currentQuest.title}
-                </h3>
+                <div>
+                  <div className="text-[9px] text-slate-400">|Δr|</div>
+                  <div className="text-[11px] font-bold text-amber-300 tabular-nums">
+                    {kinematicsTelemetry.displacement} m
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-400">Idő (t)</div>
+                  <div className="text-[11px] font-bold text-emerald-300 tabular-nums">
+                    {kinematicsTelemetry.movementTime} s
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-400">Seb. (v)</div>
+                  <div className="text-[11px] font-bold text-white tabular-nums">
+                    {kinematicsTelemetry.currentSpeed} m/s
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <p className="text-[11px] text-slate-300 leading-relaxed mb-2.5">
-            {currentQuest.description}
-          </p>
-
-          {/* Mission Objectives Checklist */}
-          <div className="space-y-1.5 pt-2.5 border-t border-slate-800 text-[11px]">
-            {[
-              currentQuest.objective,
-              'Végezd el az interaktív fizikai mérést a munkapadon',
-              'Magyarázd meg a megfigyelt jelenséget a jóváíráshoz',
-            ].map((obj: string, idx: number) => (
-              <div key={idx} className="flex items-start gap-2 text-slate-300">
-                {isCompleted || idx === 0 ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                ) : (
-                  <Circle className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
-                )}
-                <span className="leading-snug">{obj}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Live RO-01 Kinematics Telemetry Strip */}
-          <div className="mt-2.5 p-2 rounded-xl bg-slate-900/95 border border-slate-800 grid grid-cols-4 gap-1.5 text-center font-mono">
-            <div>
-              <div className="text-[9px] text-slate-400">Út (s)</div>
-              <div className="text-[11px] font-bold text-cyan-300 tabular-nums">
-                {kinematicsTelemetry.distanceTraveled} m
+              <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-mono">
+                <button
+                  onClick={() => openExperimentForQuest(currentQuest.id)}
+                  className="text-cyan-400 hover:text-cyan-300 font-bold underline underline-offset-2 cursor-pointer"
+                >
+                  Kísérlet megnyitása ➔
+                </button>
+                <span className="text-amber-400 font-bold tabular-nums">
+                  +{currentQuest.points} PONT · +{currentQuest.xpReward || 60} XP
+                </span>
               </div>
             </div>
-            <div>
-              <div className="text-[9px] text-slate-400">|Δr|</div>
-              <div className="text-[11px] font-bold text-amber-300 tabular-nums">
-                {kinematicsTelemetry.displacement} m
-              </div>
-            </div>
-            <div>
-              <div className="text-[9px] text-slate-400">Idő (t)</div>
-              <div className="text-[11px] font-bold text-emerald-300 tabular-nums">
-                {kinematicsTelemetry.movementTime} s
-              </div>
-            </div>
-            <div>
-              <div className="text-[9px] text-slate-400">Seb. (v)</div>
-              <div className="text-[11px] font-bold text-white tabular-nums">
-                {kinematicsTelemetry.currentSpeed} m/s
-              </div>
-            </div>
-          </div>
-
-          {/* Reward & Direct Lab Action Footer */}
-          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-mono">
-            <button
-              onClick={() => openExperimentForQuest(currentQuest.id)}
-              className="text-cyan-400 hover:text-cyan-300 font-bold underline underline-offset-2 cursor-pointer"
-            >
-              Kísérlet megnyitása ➔
-            </button>
-            <span className="text-amber-400 font-bold tabular-nums">
-              +{currentQuest.points} PONT · +{currentQuest.xpReward || 60} XP
-            </span>
-          </div>
+          )}
         </div>
 
         {/* Right Side: Colossal Vertical LEVELS Rail (1 to 6) with Explicit Unlock Checks */}
         <div className="pointer-events-auto flex flex-col items-end gap-1.5">
           <div className="bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-2xl p-3 shadow-2xl flex flex-col gap-2">
-            <div className="text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-widest text-right px-1">
-              DISTRICTS
-            </div>
+            <button
+              onClick={() => setDistrictsOpen((v) => !v)}
+              className="flex items-center justify-end gap-2 text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-widest px-1 cursor-pointer"
+              aria-expanded={districtsOpen}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>
+                Szint {activeTowerLevel}
+                {districtsOpen ? '' : ` · ${towerLevels.find((l) => l.districtNumber === activeTowerLevel)?.name ?? ''}`}
+              </span>
+              {districtsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
 
+            {districtsOpen && (
             <div className="flex flex-col gap-2 relative">
               <div className="absolute right-[15px] top-3 bottom-3 w-[2px] bg-slate-700" />
 
@@ -321,6 +374,7 @@ export const HUD: React.FC = () => {
                 );
               })}
             </div>
+            )}
           </div>
 
           {/* District Info & Explicit Gate Requirements Popup */}
@@ -428,33 +482,6 @@ export const HUD: React.FC = () => {
           ) : null}
         </div>
 
-        {/* Bottom-Right: Keyboard Controls Helper */}
-        <div className="pointer-events-auto bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-2xl p-3 shadow-2xl flex flex-col gap-1.5 text-[11px] font-mono">
-          <div className="flex items-center justify-between gap-3 text-slate-300">
-            <span className="flex gap-1">
-              <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">W</kbd>
-              <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">A</kbd>
-              <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">S</kbd>
-              <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">D</kbd>
-            </span>
-            <span className="text-slate-400">Mozgás</span>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 text-slate-300">
-            <kbd className="px-2 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">Space</kbd>
-            <span className="text-slate-400">Ugrás</span>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 text-slate-300">
-            <kbd className="px-2 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">E</kbd>
-            <span className="text-slate-400">Vizsgálat / Kísérlet</span>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 text-slate-300">
-            <kbd className="px-2 py-0.5 bg-slate-800 border border-slate-600 rounded text-cyan-300">Q</kbd>
-            <span className="text-slate-400">Terminál & Modulok</span>
-          </div>
-        </div>
       </div>
     </div>
   );
