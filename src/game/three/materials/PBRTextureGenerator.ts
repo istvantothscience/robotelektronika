@@ -712,6 +712,196 @@ export class PBRTextureGenerator {
   }
 
   /**
+   * Tileable ground PBR (dirt, gravel, cracks, oil stains) built from periodic value noise.
+   * Diffuse is kept near-neutral grey so each level can tint it via material.color.
+   */
+  public static createGroundPBR(): {
+    diffuse: THREE.CanvasTexture;
+    normal: THREE.CanvasTexture;
+    roughness: THREE.CanvasTexture;
+  } {
+    if (this.cachedTextures['ground_diffuse']) {
+      return {
+        diffuse: this.cachedTextures['ground_diffuse'],
+        normal: this.cachedTextures['ground_normal'],
+        roughness: this.cachedTextures['ground_roughness'],
+      };
+    }
+
+    const size = 512;
+    let seed = 1337;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    // Periodic value noise lattices (tileable on the texture edge)
+    const makeLattice = (n: number) => {
+      const g = new Float32Array(n * n);
+      for (let i = 0; i < g.length; i++) g[i] = rand();
+      return g;
+    };
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    const noise = (lat: Float32Array, n: number, x: number, y: number) => {
+      const fx = x * n;
+      const fy = y * n;
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      const tx = smooth(fx - x0);
+      const ty = smooth(fy - y0);
+      const xa = ((x0 % n) + n) % n;
+      const ya = ((y0 % n) + n) % n;
+      const xb = (xa + 1) % n;
+      const yb = (ya + 1) % n;
+      const a = lat[ya * n + xa];
+      const b = lat[ya * n + xb];
+      const c = lat[yb * n + xa];
+      const d = lat[yb * n + xb];
+      return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+    };
+    const octaves = [
+      { n: 4, amp: 0.5, lat: makeLattice(4) },
+      { n: 8, amp: 0.28, lat: makeLattice(8) },
+      { n: 16, amp: 0.14, lat: makeLattice(16) },
+      { n: 32, amp: 0.08, lat: makeLattice(32) },
+    ];
+    const stainLat = makeLattice(6);
+    const fbm = (x: number, y: number) => {
+      let v = 0;
+      for (const o of octaves) v += noise(o.lat, o.n, x, y) * o.amp;
+      return v;
+    };
+
+    const height = new Float32Array(size * size);
+    const diffData = new Uint8ClampedArray(size * size * 4);
+    const roughData = new Uint8ClampedArray(size * size * 4);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const base = fbm(u, v);
+        const grit = rand();
+        const stain = noise(stainLat, 6, u + 0.31, v + 0.17);
+        const stainMask = Math.max(0, (stain - 0.58) * 3.2);
+        const h = base * 0.75 + grit * 0.25;
+        height[y * size + x] = h;
+
+        // Grey-brown earth with dark slag speckle; stains darken and gloss
+        let lum = 0.5 + (base - 0.5) * 0.9 + (grit - 0.5) * 0.22;
+        lum *= 1 - stainMask * 0.45;
+        const warm = 0.06 * (base - 0.5);
+        const i = (y * size + x) * 4;
+        diffData[i] = Math.max(0, Math.min(255, (lum + warm) * 255));
+        diffData[i + 1] = Math.max(0, Math.min(255, lum * 245));
+        diffData[i + 2] = Math.max(0, Math.min(255, (lum - warm) * 232));
+        diffData[i + 3] = 255;
+
+        const r = Math.max(0, Math.min(1, 0.88 - stainMask * 0.42 - (grit > 0.93 ? 0.2 : 0)));
+        roughData[i] = roughData[i + 1] = roughData[i + 2] = r * 255;
+        roughData[i + 3] = 255;
+      }
+    }
+
+    // Cracks and embedded stones painted into the diffuse + height
+    const diffCanvas = document.createElement('canvas');
+    diffCanvas.width = size;
+    diffCanvas.height = size;
+    const dctx = diffCanvas.getContext('2d')!;
+    dctx.putImageData(new ImageData(diffData, size, size), 0, 0);
+    dctx.lineCap = 'round';
+    for (let c = 0; c < 9; c++) {
+      let cx = rand() * size;
+      let cy = rand() * size;
+      let ang = rand() * Math.PI * 2;
+      dctx.strokeStyle = 'rgba(12, 10, 8, 0.55)';
+      dctx.lineWidth = 1 + rand() * 1.5;
+      dctx.beginPath();
+      dctx.moveTo(cx, cy);
+      for (let k = 0; k < 22; k++) {
+        ang += (rand() - 0.5) * 0.9;
+        cx += Math.cos(ang) * (6 + rand() * 9);
+        cy += Math.sin(ang) * (6 + rand() * 9);
+        dctx.lineTo(cx, cy);
+        const px = ((Math.round(cx) % size) + size) % size;
+        const py = ((Math.round(cy) % size) + size) % size;
+        height[py * size + px] -= 0.35;
+      }
+      dctx.stroke();
+    }
+    for (let st = 0; st < 260; st++) {
+      const sx = rand() * size;
+      const sy = rand() * size;
+      const sr = 1.5 + rand() * 4.5;
+      const shade = 70 + rand() * 80;
+      dctx.fillStyle = `rgba(${shade},${shade * 0.94},${shade * 0.86},0.85)`;
+      dctx.beginPath();
+      dctx.ellipse(sx, sy, sr, sr * (0.6 + rand() * 0.4), rand() * Math.PI, 0, Math.PI * 2);
+      dctx.fill();
+      const hx = ((Math.round(sx) % size) + size) % size;
+      const hy = ((Math.round(sy) % size) + size) % size;
+      height[hy * size + hx] += 0.5;
+    }
+
+    // Normal map from height (Sobel-like central difference)
+    const nCanvas = document.createElement('canvas');
+    nCanvas.width = size;
+    nCanvas.height = size;
+    const nctx = nCanvas.getContext('2d')!;
+    const nData = nctx.createImageData(size, size);
+    const strength = 3.2;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const xl = height[y * size + ((x - 1 + size) % size)];
+        const xr = height[y * size + ((x + 1) % size)];
+        const yu = height[((y - 1 + size) % size) * size + x];
+        const yd = height[((y + 1) % size) * size + x];
+        let nx = (xl - xr) * strength;
+        let ny = (yu - yd) * strength;
+        let nz = 1;
+        const len = Math.hypot(nx, ny, nz);
+        nx /= len;
+        ny /= len;
+        nz /= len;
+        const i = (y * size + x) * 4;
+        nData.data[i] = (nx * 0.5 + 0.5) * 255;
+        nData.data[i + 1] = (ny * 0.5 + 0.5) * 255;
+        nData.data[i + 2] = (nz * 0.5 + 0.5) * 255;
+        nData.data[i + 3] = 255;
+      }
+    }
+    nctx.putImageData(nData, 0, 0);
+
+    const rCanvas = document.createElement('canvas');
+    rCanvas.width = size;
+    rCanvas.height = size;
+    rCanvas.getContext('2d')!.putImageData(new ImageData(roughData, size, size), 0, 0);
+
+    const prep = (canvas: HTMLCanvasElement, srgb: boolean) => {
+      const t = new THREE.CanvasTexture(canvas);
+      t.wrapS = THREE.RepeatWrapping;
+      t.wrapT = THREE.RepeatWrapping;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const diffuse = prep(diffCanvas, true);
+    const normal = prep(nCanvas, false);
+    const roughness = prep(rCanvas, false);
+    this.cachedTextures['ground_diffuse'] = diffuse;
+    this.cachedTextures['ground_normal'] = normal;
+    this.cachedTextures['ground_roughness'] = roughness;
+    return { diffuse, normal, roughness };
+  }
+
+  /** Sharpens all cached procedural maps at grazing angles (ground, walkways). */
+  public static applyAnisotropy(level: number) {
+    Object.values(this.cachedTextures).forEach((t) => {
+      t.anisotropy = level;
+      t.needsUpdate = true;
+    });
+  }
+
+  /**
    * Generates a 360-degree panoramic Atmospheric Industrial Environment Map!
    * Combines cool slate-indigo upper sky reflections with warm amber horizon light for realistic metal PBR.
    */

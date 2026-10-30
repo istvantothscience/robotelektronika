@@ -6,6 +6,7 @@ import { EnvironmentalStoryLandmarks } from '../environment/EnvironmentalStoryLa
 import { LocalizedSteamAndSparks } from '../effects/LocalizedSteamAndSparks';
 import { LEVEL_1_WORLD_INTERACTABLES } from '../../../data/worldContent';
 import { InteractionCategory } from '../../../types/game';
+import { mergeStaticMeshes } from './StaticBatcher';
 
 export interface GeneratedQuestBeacon {
   id: string;
@@ -85,6 +86,8 @@ export class WorldGenerator {
   private skyCityLights: THREE.Points | null = null;
   private lastLightningUpdate: number = 0;
   private tempVec: THREE.Vector3 = new THREE.Vector3();
+  private mergedGeometries: THREE.BufferGeometry[] = [];
+  private groundMaterial: THREE.MeshStandardMaterial | null = null;
 
   constructor(initialLevelNumber: number = 1) {
     this.rootGroup = new THREE.Group();
@@ -108,6 +111,11 @@ export class WorldGenerator {
       const child = this.rootGroup.children[0];
       this.rootGroup.remove(child);
     }
+
+    this.mergedGeometries.forEach((g) => g.dispose());
+    this.mergedGeometries = [];
+    this.groundMaterial?.dispose();
+    this.groundMaterial = null;
 
     this.colliders = [];
     this.questBeacons = [];
@@ -157,6 +165,31 @@ export class WorldGenerator {
 
     // 10. ATMOSPHERIC DEPTH: Billowing Smokestack Plumes, Localized Pipe Steam, Intermittent Sparks & Volumetric Sunbeams
     this.buildSmokeAndAtmosphere();
+
+    // 11. PERFORMANCE: collapse static props into a few large batches (animated parts stay separate)
+    this.batchStaticGeometry();
+  }
+
+  private batchStaticGeometry() {
+    const animatedRoots: Array<THREE.Object3D | null | undefined> = [
+      this.cloudLayerGroup,
+      this.sunbeamsGroup,
+      this.holoAtom,
+      this.centralElevatorBeam,
+      this.companionVolt7?.group,
+      this.localizedSteamAndSparks?.group,
+      ...this.rotatingGears.map((g) => g.gear),
+      ...this.animatedCranes.map((c) => c.crane),
+      ...this.towerRings,
+      ...this.airships.map((a) => a.group),
+      ...this.questBeacons.flatMap((b) => [b.group, b.lightBeam, b.iconMesh]),
+      ...this.steamEngines.flatMap((e) => [e.flywheel, e.driveGear, e.pistonRod, e.governor]),
+    ];
+    const result = mergeStaticMeshes(this.rootGroup, animatedRoots);
+    this.mergedGeometries = result.mergedGeometries;
+    if (import.meta.env.DEV) {
+      console.info(`[StaticBatcher] meshes ${result.meshesBefore} -> ${result.meshesAfter}`);
+    }
   }
 
   /**
@@ -318,7 +351,19 @@ export class WorldGenerator {
     }
     groundGeo.computeVertexNormals();
 
-    const ground = new THREE.Mesh(groundGeo, ProceduralMeshFactory.materials.weatheredConcrete);
+    const groundPbr = PBRTextureGenerator.createGroundPBR();
+    [groundPbr.diffuse, groundPbr.normal, groundPbr.roughness].forEach((t) => t.repeat.set(w / 4.5, d / 4.5));
+    this.groundMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(spec.terrain.groundColor).multiplyScalar(7),
+      map: groundPbr.diffuse,
+      normalMap: groundPbr.normal,
+      normalScale: new THREE.Vector2(1.1, 1.1),
+      roughnessMap: groundPbr.roughness,
+      roughness: 1,
+      metalness: 0.08,
+      envMapIntensity: 0.45,
+    });
+    const ground = new THREE.Mesh(groundGeo, this.groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.rootGroup.add(ground);

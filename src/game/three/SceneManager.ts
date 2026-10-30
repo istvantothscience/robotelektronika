@@ -28,6 +28,18 @@ export class SceneManager {
   private bounceLight!: THREE.DirectionalLight;
   private unsubscribeStore: (() => void) | null = null;
 
+  // Shadow frustum that follows the player (tight, high-res) instead of covering the whole valley
+  private static readonly SHADOW_RADIUS = 30;
+  private sunOffset = new THREE.Vector3(38, 46, 26);
+  private shadowTarget = new THREE.Vector3();
+  private lightBasisRight = new THREE.Vector3();
+  private lightBasisUp = new THREE.Vector3();
+
+  // Adaptive quality: step graphics down automatically on slow classroom machines
+  private frameTimeAvg = 16;
+  private slowSeconds = 0;
+  private lastAutoAdjust = 0;
+
   // Input & Camera Controls
   private input: PlayerInput = {
     forward: false,
@@ -88,6 +100,10 @@ export class SceneManager {
       console.warn('Could not generate environment map:', e);
     }
 
+    PBRTextureGenerator.applyAnisotropy(
+      Math.min(8, this.renderer.capabilities.getMaxAnisotropy())
+    );
+
     container.appendChild(this.renderer.domElement);
 
     // 4. Lighting Setup
@@ -139,6 +155,10 @@ export class SceneManager {
     // 6. Bind Event Listeners
     this.bindEvents();
 
+    if (import.meta.env.DEV) {
+      (window as unknown as { __sm?: SceneManager }).__sm = this;
+    }
+
     // 7. Start render loop
     this.start();
   }
@@ -149,11 +169,31 @@ export class SceneManager {
     this.renderer.shadowMap.enabled = cfg.shadowsEnabled;
     if (this.sunLight) {
       this.sunLight.castShadow = cfg.shadowsEnabled;
+      if (this.sunLight.shadow.mapSize.x !== cfg.shadowMapSize) {
+        this.sunLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
+        this.sunLight.shadow.map?.dispose();
+        this.sunLight.shadow.map = null;
+      }
     }
+    this.applyLightBudget(quality);
     if (this.postProcessing) {
       this.postProcessing.enabled = cfg.postProcessingEnabled;
     }
     this.world.setEffectsVisibility(cfg.particlesEnabled, cfg.atmosphericEffectsEnabled);
+  }
+
+  /** Point lights are expensive per-pixel on every lit material; keep only a few on low quality. */
+  private applyLightBudget(quality: GraphicsQuality) {
+    const maxPointLights = quality === 'low' ? 3 : quality === 'medium' ? 8 : Infinity;
+    const lights: THREE.PointLight[] = [];
+    this.scene.traverse((o) => {
+      if ((o as THREE.PointLight).isPointLight) lights.push(o as THREE.PointLight);
+    });
+    // Keep the player's eye light and the brightest/largest-range lights
+    lights.sort((a, b) => (b.intensity * b.distance) - (a.intensity * a.distance));
+    lights.forEach((l, i) => {
+      l.visible = l === this.player?.eyeLightRef || i < maxPointLights;
+    });
   }
 
   private setupLighting() {
@@ -169,14 +209,17 @@ export class SceneManager {
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 1024;
     this.sunLight.shadow.mapSize.height = 1024;
+    const R = SceneManager.SHADOW_RADIUS;
     this.sunLight.shadow.camera.near = 2;
-    this.sunLight.shadow.camera.far = 120;
-    this.sunLight.shadow.camera.left = -44;
-    this.sunLight.shadow.camera.right = 44;
-    this.sunLight.shadow.camera.top = 44;
-    this.sunLight.shadow.camera.bottom = -44;
+    this.sunLight.shadow.camera.far = 150;
+    this.sunLight.shadow.camera.left = -R;
+    this.sunLight.shadow.camera.right = R;
+    this.sunLight.shadow.camera.top = R;
+    this.sunLight.shadow.camera.bottom = -R;
     this.sunLight.shadow.bias = -0.0005;
+    this.sunLight.shadow.normalBias = 0.04;
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     this.bounceLight = new THREE.DirectionalLight(0xc27838, 1.25);
     this.bounceLight.position.set(-24, 18, 22);
@@ -187,6 +230,7 @@ export class SceneManager {
     const spec = LEVEL_SPECIFICATIONS[levelNum] || LEVEL_SPECIFICATIONS[1];
     this.world.generateLevel(spec);
     this.applyLevelLighting(spec);
+    this.applyLightBudget(useGameStore.getState().quality);
 
     // Reset player position to starting pod
     this.player.position.set(0, 0, 11);
@@ -205,7 +249,8 @@ export class SceneManager {
     this.ambientLight.intensity = spec.sky.ambientIntensity;
     this.sunLight.color.setHex(spec.sky.sunColor);
     this.sunLight.intensity = spec.sky.sunIntensity;
-    this.sunLight.position.set(...spec.sky.sunPosition);
+    this.sunOffset.set(...spec.sky.sunPosition);
+    this.sunLight.position.copy(this.sunOffset);
     this.bounceLight.color.setHex(spec.sky.secondaryLightColor);
     this.bounceLight.intensity = spec.sky.secondaryLightIntensity;
   }
@@ -404,6 +449,7 @@ export class SceneManager {
 
     const now = performance.now();
     let delta = (now - this.lastTime) / 1000;
+    const rawDelta = delta;
     this.lastTime = now;
     if (delta > 0.1) delta = 0.1; // Clamp delta to avoid physics jumping on tab pause
 
@@ -513,6 +559,13 @@ export class SceneManager {
       });
     }
 
+    // 5B. Keep the shadow frustum centred on the player, snapped to shadow texels (no shimmer)
+    this.updateShadowFollow(pPos);
+
+    // 5C. Adaptive quality based on real frame time
+    this.frameTimeAvg += (rawDelta * 1000 - this.frameTimeAvg) * 0.05;
+    this.adaptQuality(rawDelta, now);
+
     // 6. Render Scene (with restrained post-processing bloom when enabled by Graphics Quality preset)
     if (this.postProcessing && this.postProcessing.enabled) {
       this.postProcessing.render();
@@ -520,6 +573,48 @@ export class SceneManager {
       this.renderer.render(this.scene, this.camera);
     }
   };
+
+  private updateShadowFollow(pPos: THREE.Vector3) {
+    if (!this.sunLight.castShadow) return;
+    const dir = this.sunOffset.clone().normalize();
+    this.lightBasisRight.crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
+    this.lightBasisUp.crossVectors(dir, this.lightBasisRight).normalize();
+
+    const texel = (SceneManager.SHADOW_RADIUS * 2) / this.sunLight.shadow.mapSize.x;
+    const r = Math.round(pPos.dot(this.lightBasisRight) / texel) * texel;
+    const u = Math.round(pPos.dot(this.lightBasisUp) / texel) * texel;
+    const d = pPos.dot(dir);
+    this.shadowTarget
+      .copy(this.lightBasisRight).multiplyScalar(r)
+      .addScaledVector(this.lightBasisUp, u)
+      .addScaledVector(dir, d);
+
+    this.sunLight.target.position.copy(this.shadowTarget);
+    this.sunLight.position.copy(this.shadowTarget).addScaledVector(dir, this.sunOffset.length());
+    this.sunLight.target.updateMatrixWorld();
+  }
+
+  private adaptQuality(rawDelta: number, now: number) {
+    if (document.hidden || rawDelta > 0.5) return; // tab switches / hitches are not a signal
+    if (this.frameTimeAvg > 30) this.slowSeconds += rawDelta;
+    else this.slowSeconds = Math.max(0, this.slowSeconds - rawDelta * 2);
+
+    if (this.slowSeconds > 3 && now - this.lastAutoAdjust > 6000) {
+      const store = useGameStore.getState();
+      const next: GraphicsQuality | null =
+        store.quality === 'high' ? 'medium' : store.quality === 'medium' ? 'low' : null;
+      this.slowSeconds = 0;
+      this.lastAutoAdjust = now;
+      if (next) {
+        store.setQuality(next);
+        store.addToast({
+          type: 'info',
+          title: 'Grafika automatikusan csökkentve',
+          message: `A gép lassúnak bizonyult, ezért a minőség: ${next === 'medium' ? 'közepes' : 'alacsony'}. A Menüben visszaállítható.`,
+        });
+      }
+    }
+  }
 
   private checkTriggersAndLocation(pPos: THREE.Vector3) {
     // A. Check Location Name update

@@ -27,6 +27,9 @@ export class PlayerController {
   private eyeLeft!: THREE.Group;
   private eyeRight!: THREE.Group;
   private eyeLight!: THREE.PointLight;
+  public get eyeLightRef(): THREE.PointLight {
+    return this.eyeLight;
+  }
   private chestGear!: THREE.Group;
   private backpackGear!: THREE.Group;
   private thrusterGlow!: THREE.Group;

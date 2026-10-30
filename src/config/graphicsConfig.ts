@@ -32,7 +32,7 @@ export const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsConfig> = {
   high: {
     quality: 'high',
     shadowsEnabled: true,
-    shadowMapSize: 1024,
+    shadowMapSize: 2048,
     maxPixelRatio: 1.5,
     particlesEnabled: true,
     postProcessingEnabled: true,
