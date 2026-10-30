@@ -8,6 +8,8 @@ import { NotificationToast } from './components/NotificationToast';
 import { StoryDialogBubble } from './components/StoryDialogBubble';
 import { CinematicIntroOverlay } from './components/CinematicIntroOverlay';
 import { useGameStore } from './store/useGameStore';
+import { TouchControls } from './components/TouchControls';
+import { useIsTouch } from './input/virtualInput';
 import { LoginGate, DEMO_FLAG_KEY } from './components/LoginGate';
 import { authService } from './services/authService';
 import { pointTrackerService, DEFAULT_STUDENT, DEMO_USER_ID } from './services/pointTrackerService';
@@ -57,6 +59,7 @@ function useAuthGate(): AuthStatus {
 export default function App() {
   const { activeModal } = useGameStore();
   const authStatus = useAuthGate();
+  const isTouch = useIsTouch();
 
   if (authStatus === 'checking') {
     return <main className="w-screen h-screen bg-slate-950" />;
@@ -72,6 +75,8 @@ export default function App() {
 
       {/* Primary In-Game HUD */}
       <HUD />
+
+      {isTouch && activeModal === null && <TouchControls />}
 
       {/* RO-01 Opening Story & Contextual Speech Bubbles */}
       <StoryDialogBubble />

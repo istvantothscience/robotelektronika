@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { SceneManager } from '../game/three/SceneManager';
 import { useGameStore } from '../store/useGameStore';
+import { useIsTouch } from '../input/virtualInput';
 import { Compass, Move, Volume2, VolumeX, HelpCircle } from 'lucide-react';
 
 export const GameCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const { currentLocationName, isMuted, toggleMute, openModal } = useGameStore();
+  const isTouch = useIsTouch();
   const [showControlsHint, setShowControlsHint] = useState(true);
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export const GameCanvas: React.FC = () => {
   return (
     <div className="relative w-full h-screen overflow-hidden bg-slate-950 select-none">
       {/* 3D WebGL Canvas Container */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing touch-none" />
 
       {/* Crosshair / Viewport Center Indicator (Subtle sci-fi reticle) */}
       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
@@ -50,7 +52,7 @@ export const GameCanvas: React.FC = () => {
       </div>
 
       {/* Controls Helper Widget (Bottom Left) */}
-      {showControlsHint && (
+      {showControlsHint && !isTouch && (
         <div className="absolute bottom-20 right-6 z-30 p-3 rounded-lg bg-slate-900/85 backdrop-blur-md border border-slate-700/60 shadow-xl max-w-xs transition-opacity duration-300">
           <div className="flex items-center justify-between gap-3 mb-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 font-display">
@@ -76,6 +78,7 @@ export const GameCanvas: React.FC = () => {
       )}
 
       {/* Bottom Floating Quick Actions */}
+      {!isTouch && (
       <div className="absolute bottom-6 right-6 z-10 flex items-center gap-2">
         <button
           onClick={toggleMute}
@@ -101,6 +104,7 @@ export const GameCanvas: React.FC = () => {
           <kbd className="px-1 py-0.2 bg-cyan-800/80 rounded text-[10px] text-cyan-200 font-mono">M</kbd>
         </button>
       </div>
+      )}
     </div>
   );
 };

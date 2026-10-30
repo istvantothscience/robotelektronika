@@ -26,6 +26,7 @@ import {
 } from '../types/game';
 import { soundManager } from '../audio/soundManager';
 import confetti from 'canvas-confetti';
+import { IS_TOUCH_DEVICE } from '../input/virtualInput';
 
 // Felhasználónként külön mentés: közös gépen több diák is játszhat egymást nem felülírva
 const progressionKey = () =>
@@ -382,7 +383,7 @@ export const useGameStore = create<GameStoreState>((set, get) => {
       pendingCompletionsCount: 0,
       lastError: null,
     },
-    quality: 'high',
+    quality: IS_TOUCH_DEVICE ? 'medium' : 'high',
     isMuted: false,
     toasts: [],
 

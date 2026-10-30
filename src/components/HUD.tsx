@@ -5,6 +5,7 @@ import { Minimap } from './Minimap';
 import { authService } from '../services/authService';
 import { pointTrackerService, DEFAULT_STUDENT } from '../services/pointTrackerService';
 import { DEMO_FLAG_KEY } from './LoginGate';
+import { useIsTouch } from '../input/virtualInput';
 import {
   Zap,
   Settings,
@@ -21,6 +22,9 @@ import {
   ChevronUp,
   Layers,
   LogOut,
+  Volume2,
+  VolumeX,
+  Terminal,
 } from 'lucide-react';
 
 const readFlag = (key: string, fallback: boolean): boolean => {
@@ -61,9 +65,12 @@ export const HUD: React.FC = () => {
     openExperimentForQuest,
     openModal,
     openWorldInteraction,
+    isMuted,
+    toggleMute,
   } = useGameStore();
 
   const [selectedLevelInfo, setSelectedLevelInfo] = useState<number | null>(null);
+  const isTouch = useIsTouch();
   const [menuOpen, setMenuOpen] = useState(false);
   const [missionOpen, setMissionOpen] = useState(() => readFlag('hud.missionOpen', false));
   const [districtsOpen, setDistrictsOpen] = useState(false);
@@ -87,6 +94,8 @@ export const HUD: React.FC = () => {
     { label: 'Mellékküldetés & Házi', icon: BookOpen, color: 'text-emerald-400', run: () => openModal('menu', 'side_quests') },
     { label: `Memóriák (${unlockedLoreCount}/5)`, icon: Sparkles, color: 'text-cyan-400', run: () => openModal('menu', 'lore') },
     { label: 'VOLT-7 („Szikra”)', icon: MessageSquare, color: 'text-cyan-400', run: () => openWorldInteraction('companion-volt7') },
+    { label: 'Terminál & küldetések', icon: Terminal, color: 'text-slate-300', run: () => openModal('menu', 'quests') },
+    { label: isMuted ? 'Hang bekapcsolása' : 'Hang némítása', icon: isMuted ? VolumeX : Volume2, color: 'text-slate-300', run: toggleMute },
     {
       label: pointTrackerService.isDemoUser() ? 'Kilépés a demóból' : 'Kijelentkezés',
       icon: LogOut,
@@ -153,7 +162,7 @@ export const HUD: React.FC = () => {
                         setMenuOpen(false);
                         item.run();
                       }}
-                      className="w-full px-3 py-2 rounded-lg hover:bg-slate-800 text-xs text-slate-200 font-mono flex items-center gap-2.5 cursor-pointer transition-colors text-left"
+                      className={`w-full px-3 ${isTouch ? 'py-3' : 'py-2'} rounded-lg hover:bg-slate-800 text-xs text-slate-200 font-mono flex items-center gap-2.5 cursor-pointer transition-colors text-left`}
                     >
                       <item.icon className={`w-3.5 h-3.5 ${item.color}`} />
                       <span>{item.label}</span>
@@ -165,6 +174,7 @@ export const HUD: React.FC = () => {
           </div>
         </div>
 
+        <div className="flex flex-col items-end gap-2">
         {/* Top-Right: Player Card with Separate School Points & Game XP */}
         <div className="pointer-events-auto flex items-center gap-3 bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-2xl p-2.5 pr-4 shadow-2xl">
           <div className="relative w-11 h-11 rounded-full bg-slate-800 border-2 border-amber-500/70 shadow-lg flex items-center justify-center overflow-hidden">
@@ -212,6 +222,16 @@ export const HUD: React.FC = () => {
               </span>
             </div>
           </div>
+        </div>
+          {isTouch && (
+            <div className="pointer-events-auto scale-[0.72] origin-top-right -mb-9">
+              <Minimap
+                playerX={playerCoordinates.x}
+                playerZ={playerCoordinates.z}
+                playerAngle={playerCoordinates.angle}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -451,8 +471,8 @@ export const HUD: React.FC = () => {
 
       {/* 3. BOTTOM ROW: MINIMAP (Left), 3-CATEGORY INTERACTION PROMPT (Center), CONTROLS (Right) */}
       <div className="flex items-end justify-between w-full">
-        {/* Bottom-Left: Radar Minimap */}
-        <div className="pointer-events-auto">
+        {/* Bottom-Left: Radar Minimap (on tablets it moves under the player card; the joystick lives here) */}
+        <div className={`pointer-events-auto ${isTouch ? 'invisible' : ''}`}>
           <Minimap
             playerX={playerCoordinates.x}
             playerZ={playerCoordinates.z}

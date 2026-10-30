@@ -6,6 +6,7 @@ import { PBRTextureGenerator } from './materials/PBRTextureGenerator';
 import { useGameStore } from '../../store/useGameStore';
 import { soundManager } from '../../audio/soundManager';
 import { GRAPHICS_PRESETS, GraphicsQuality } from '../../config/graphicsConfig';
+import { virtualInput } from '../../input/virtualInput';
 import { PostProcessingPipeline } from './postprocessing/PostProcessingPipeline';
 
 export class SceneManager {
@@ -49,6 +50,16 @@ export class SceneManager {
     jump: false,
     sprint: false,
   };
+
+  private mergedInput: PlayerInput = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    jump: false,
+    sprint: false,
+  };
+  private cameraTouchId: number | null = null;
 
   private cameraYaw: number = 0;
   private cameraPitch: number = 0.35;
@@ -269,6 +280,7 @@ export class SceneManager {
     // Touch controls for tablets
     el.addEventListener('touchstart', this.onTouchStart, { passive: true });
     window.addEventListener('touchend', this.onTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', this.onTouchEnd, { passive: true });
     window.addEventListener('touchmove', this.onTouchMove, { passive: true });
   }
 
@@ -285,6 +297,7 @@ export class SceneManager {
 
     el.removeEventListener('touchstart', this.onTouchStart);
     window.removeEventListener('touchend', this.onTouchEnd);
+    window.removeEventListener('touchcancel', this.onTouchEnd);
     window.removeEventListener('touchmove', this.onTouchMove);
   }
 
@@ -396,27 +409,35 @@ export class SceneManager {
   };
 
   private onTouchStart = (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      this.isPointerDown = true;
-      this.prevMouseX = e.touches[0].clientX;
-      this.prevMouseY = e.touches[0].clientY;
+    if (this.cameraTouchId !== null) return;
+    const t = e.changedTouches[0];
+    this.cameraTouchId = t.identifier;
+    this.isPointerDown = true;
+    this.prevMouseX = t.clientX;
+    this.prevMouseY = t.clientY;
+  };
+
+  private onTouchEnd = (e: TouchEvent) => {
+    for (const t of Array.from(e.changedTouches)) {
+      if (t.identifier === this.cameraTouchId) {
+        this.cameraTouchId = null;
+        this.isPointerDown = false;
+      }
     }
   };
 
-  private onTouchEnd = () => {
-    this.isPointerDown = false;
-  };
-
   private onTouchMove = (e: TouchEvent) => {
-    if (!this.isPointerDown || e.touches.length !== 1) return;
-    const deltaX = e.touches[0].clientX - this.prevMouseX;
-    const deltaY = e.touches[0].clientY - this.prevMouseY;
+    if (this.cameraTouchId === null) return;
+    const t = Array.from(e.touches).find((x) => x.identifier === this.cameraTouchId);
+    if (!t) return;
+    const deltaX = t.clientX - this.prevMouseX;
+    const deltaY = t.clientY - this.prevMouseY;
 
     this.cameraYaw -= deltaX * 0.008;
     this.cameraPitch = Math.max(0.1, Math.min(1.2, this.cameraPitch + deltaY * 0.007));
 
-    this.prevMouseX = e.touches[0].clientX;
-    this.prevMouseY = e.touches[0].clientY;
+    this.prevMouseX = t.clientX;
+    this.prevMouseY = t.clientY;
   };
 
   private onResize = () => {
@@ -456,7 +477,14 @@ export class SceneManager {
     const pPos = this.player.getPosition();
 
     // 1. Update Player with collisions
-    this.player.update(delta, this.input, this.cameraYaw, this.world.colliders);
+    const mi = this.mergedInput;
+    mi.forward = this.input.forward || virtualInput.forward;
+    mi.backward = this.input.backward || virtualInput.backward;
+    mi.left = this.input.left || virtualInput.left;
+    mi.right = this.input.right || virtualInput.right;
+    mi.jump = this.input.jump || virtualInput.jump;
+    mi.sprint = this.input.sprint || virtualInput.sprint;
+    this.player.update(delta, mi, this.cameraYaw, this.world.colliders);
 
     // 1B. Compute Live Kinematics Telemetry (s, Δr, t, v, a) & RO-01 Contextual Reactions
     const stepDist = Math.hypot(pPos.x - this.prevPosition.x, pPos.z - this.prevPosition.z);
